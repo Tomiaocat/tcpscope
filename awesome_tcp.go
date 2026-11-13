@@ -368,6 +368,23 @@ type sendReq struct {
 }
 
 func main() {
+	cfg := ParseConfig()
+	if cfg.DemoMode == "legacy" {
+		runLegacy()
+		return
+	}
+	lab, err := NewLab(cfg)
+	if err != nil {
+		log.Fatalf("启动协议实验室失败: %v", err)
+	}
+	if err := lab.Run(); err != nil {
+		log.Fatalf("协议实验室运行失败: %v", err)
+	}
+}
+
+// runLegacy keeps the original single-connection raw TCP teaching engine
+// available for comparison with the real protocol lab.
+func runLegacy() {
 	engine := NewAwesomeTCPEngine()
 	if err := engine.StartRealTCPServer(); err != nil {
 		log.Fatalf("启动 TCP 服务端失败: %v", err)
