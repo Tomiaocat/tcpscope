@@ -1,0 +1,1523 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>了不起的TCP (Awesome TCP) — 零配置硬核协议解剖实验室</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              bg: '#070B14',
+              panel: '#0D1322',
+              border: '#1E293B',
+              cyan: '#00F0FF',
+              emerald: '#10B981',
+              amber: '#F59E0B',
+              rose: '#F43F5E',
+              purple: '#A855F7'
+            }
+          },
+          fontFamily: {
+            mono: ['"JetBrains Mono"', '"Fira Code"', 'Consolas', 'monospace'],
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+    body {
+      background-color: #070B14;
+      color: #E2E8F0;
+      font-family: 'Inter', system-ui, sans-serif;
+      overflow-x: hidden;
+    }
+    .cyber-grid {
+      background-image: 
+        linear-gradient(to right, rgba(30, 41, 59, 0.35) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(30, 41, 59, 0.35) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    .glow-cyan {
+      box-shadow: 0 0 20px rgba(0, 240, 255, 0.18), inset 0 0 12px rgba(0, 240, 255, 0.08);
+    }
+    .glow-emerald {
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.18), inset 0 0 12px rgba(16, 185, 129, 0.08);
+    }
+    .glow-amber {
+      box-shadow: 0 0 18px rgba(245, 158, 11, 0.25);
+    }
+    @keyframes dashFlowRight {
+      to { stroke-dashoffset: -40; }
+    }
+    @keyframes dashFlowLeft {
+      to { stroke-dashoffset: 40; }
+    }
+    .cable-flow-right {
+      stroke-dasharray: 8 6;
+      animation: dashFlowRight 0.9s linear infinite;
+    }
+    .cable-flow-left {
+      stroke-dasharray: 8 6;
+      animation: dashFlowLeft 0.9s linear infinite;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090E1A;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1E293B;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+    .byte-highlight {
+      background-color: rgba(0, 240, 255, 0.28);
+      color: #FFFFFF;
+      border-radius: 2px;
+      outline: 1px solid #00F0FF;
+    }
+  </style>
+</head>
+<body class="min-h-screen cyber-grid flex flex-col selection:bg-cyan-500/30 selection:text-cyan-200">
+
+  <!-- Top Navigation / Status Header -->
+  <header class="border-b border-slate-800/80 bg-[#090E1A]/90 backdrop-blur-md sticky top-0 z-30 px-4 py-2.5">
+    <div class="max-w-[1600px] mx-auto flex flex-wrap items-center justify-between gap-3">
+      <!-- Brand -->
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500/20 to-emerald-500/20 border border-cyan-400/40 flex items-center justify-center shadow-inner">
+          <svg class="w-5 h-5 text-cyan-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-base tracking-wide bg-gradient-to-r from-cyan-300 via-teal-200 to-emerald-400 bg-clip-text text-transparent">了不起的 TCP</h1>
+            <span class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">v1.0 纯净零付费</span>
+            <span class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">免登录 · 零依赖</span>
+            <span id="engineModeBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">引擎检测中...</span>
+          </div>
+          <p class="text-xs text-slate-400">直观透视每一次握手、序号演进、滑动窗口与原始 16 进制报文帧</p>
+        </div>
+      </div>
+
+      <!-- Mode & Speed Controls -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <div class="flex items-center bg-slate-900/90 border border-slate-800 rounded-lg p-1 text-xs">
+          <span class="text-slate-400 px-2 font-mono">动画流速:</span>
+          <button id="speedSlowBtn" class="px-2.5 py-1 rounded-md font-medium transition bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">教学慢放 (0.8x)</button>
+          <button id="speedNormBtn" class="px-2.5 py-1 rounded-md font-medium transition text-slate-400 hover:text-slate-200">标准 (1.5x)</button>
+          <button id="speedFastBtn" class="px-2.5 py-1 rounded-md font-medium transition text-slate-400 hover:text-slate-200">极速 (3x)</button>
+        </div>
+
+        <button id="chaosDropBtn" class="px-3 py-1.5 rounded-lg text-xs font-mono border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition flex items-center gap-1.5" title="开启后下一次数据包将模拟在网线中丢失并触发 TCP 超时重传 (RTO)">
+          <span id="chaosIndicator" class="w-2 h-2 rounded-full bg-slate-500"></span>
+          <span>模拟丢包重传: 关</span>
+        </button>
+
+        <button id="nagleDemoBtn" class="px-3 py-1.5 rounded-lg text-xs font-mono border border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 transition" title="一键连续发送3个小包，直观观察 TCP 字节流粘包现象">
+          ⚡ 演示粘包冲击
+        </button>
+
+        <button id="soundToggleBtn" class="px-2.5 py-1.5 rounded-lg text-xs font-mono border border-slate-700 bg-slate-800/70 text-slate-300 hover:border-slate-600 transition">
+          🔊 音效: 开
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="flex-1 max-w-[1600px] w-full mx-auto p-3 sm:p-4 flex flex-col gap-3.5">
+
+    <!-- Upper Section: Left TCP Client | Center Physical Cable | Right TCP Server -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch">
+
+      <!-- LEFT COLUMN: TCP CLIENT (4 cols) -->
+      <div id="clientPanel" class="lg:col-span-4 bg-[#0D1322]/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between transition-all duration-300">
+        <div>
+          <!-- Header & State Badge -->
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-3 mb-3">
+            <div class="flex items-center gap-2.5">
+              <span class="w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_10px_#00F0FF]"></span>
+              <div>
+                <h2 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+                  TCP 客户端 (Client)
+                  <span class="text-[11px] font-mono text-cyan-400 bg-cyan-950/70 border border-cyan-800/60 px-1.5 py-0.5 rounded" id="clientAddrBadge">127.0.0.1:----</span>
+                </h2>
+                <p class="text-[11px] text-slate-400">主动发起连接 · 发送请求字节流</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-[10px] font-mono uppercase text-slate-400">状态机 (FSM)</div>
+              <div id="clientStateBadge" class="inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">CLOSED</div>
+            </div>
+          </div>
+
+          <!-- Client Internal TCP Registers -->
+          <div class="grid grid-cols-4 gap-2 mb-3 bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/80 font-mono">
+            <div>
+              <div class="text-[10px] text-slate-400">SND.NXT (Seq)</div>
+              <div id="clientSeqVal" class="text-xs font-bold text-cyan-300">0 (Rel)</div>
+              <div id="clientRawSeqVal" class="text-[10px] text-slate-500">ISN: --</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400">RCV.NXT (Ack)</div>
+              <div id="clientAckVal" class="text-xs font-bold text-emerald-300">0 (Rel)</div>
+              <div class="text-[10px] text-slate-500">期望收序号</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400">RCV.WND</div>
+              <div id="clientWinVal" class="text-xs font-bold text-amber-300">65535 B</div>
+              <div class="text-[10px] text-slate-500">接收窗口</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400">已发/已收</div>
+              <div id="clientBytesStat" class="text-xs font-bold text-slate-200">0 / 0 B</div>
+              <div class="text-[10px] text-slate-500">累计载荷</div>
+            </div>
+          </div>
+
+          <!-- Connect Action Bar with Beginner Prompt -->
+          <div class="mb-3">
+            <div id="connectPromptHint" class="mb-2 px-3 py-2 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-between text-xs text-cyan-200">
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                <span>右侧服务端已自动就绪！请点击下方按钮发起<strong>三次握手</strong>并自动发送 <code class="px-1 py-0.5 rounded bg-cyan-950 text-cyan-300 font-mono">hello</code></span>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button id="clientConnectBtn" class="flex-1 py-2.5 px-4 rounded-lg font-semibold text-xs bg-gradient-to-r from-cyan-500 to-teal-500 text-slate-950 hover:from-cyan-400 hover:to-teal-400 shadow-[0_0_20px_rgba(0,240,255,0.3)] transition flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                <span id="clientConnectBtnText">点击连接服务端 (三次握手 + 自动发 hello)</span>
+              </button>
+              <button id="clientCloseBtn" disabled class="px-3 py-2.5 rounded-lg font-mono text-xs border border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 disabled:opacity-30 disabled:pointer-events-none transition" title="发起四次挥手优雅断开连接">
+                断开 (FIN)
+              </button>
+            </div>
+          </div>
+
+          <!-- Client Application Log -->
+          <div class="mb-3">
+            <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1 font-mono">
+              <span>客户端收发缓冲区 (Socket Stream)</span>
+              <button id="clearClientLogBtn" class="hover:text-slate-200">清空视图</button>
+            </div>
+            <div id="clientStreamBox" class="h-32 overflow-y-auto rounded-lg bg-slate-950/90 border border-slate-800/90 p-2.5 font-mono text-xs space-y-1.5">
+              <div class="text-slate-500 italic text-[11px]">等待发起连接...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Client Send Input -->
+        <div class="pt-2 border-t border-slate-800/80">
+          <label class="block text-[11px] text-slate-400 mb-1.5 font-mono">向服务端发送自定义数据 (Payload):</label>
+          <div class="flex gap-2">
+            <input id="clientInput" type="text" value="hello" placeholder="输入要发送给服务端的文本，例如 hello..." disabled class="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-cyan-400 disabled:opacity-40" />
+            <button id="clientSendBtn" disabled class="px-4 py-2 rounded-lg text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30 disabled:opacity-30 disabled:pointer-events-none transition whitespace-nowrap">
+              发送 PSH+ACK →
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CENTER COLUMN: PHYSICAL NETWORK CABLE & PACKET ANIMATION (4 cols) -->
+      <div class="lg:col-span-4 bg-[#0A0F1D]/95 border border-slate-800 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden">
+        <!-- Top Cable Header -->
+        <div class="flex items-center justify-between z-10">
+          <div class="flex items-center gap-2">
+            <span id="cableStatusDot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+            <span id="cableStatusTitle" class="text-xs font-mono font-bold text-slate-300">物理网线状态: 未插通 (等待握手)</span>
+          </div>
+          <span id="rttBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">RTT: 0.42 ms</span>
+        </div>
+
+        <!-- Interactive Visual Cable Stage -->
+        <div class="my-3 relative flex-1 min-h-[210px] flex flex-col justify-center bg-slate-950/80 rounded-xl border border-slate-800/90 p-3 overflow-hidden">
+          <!-- Subtle RJ45 / NIC Left & Right Ports -->
+          <div class="flex items-center justify-between text-[10px] font-mono text-slate-400 mb-2 z-10">
+            <span class="px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/50 text-cyan-300">◀ 客户端网卡 (NIC)</span>
+            <span id="inFlightCountBadge" class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300">信道空闲</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-950/60 border border-emerald-800/50 text-emerald-300">服务端网卡 (NIC) ▶</span>
+          </div>
+
+          <!-- SVG Cable Conduit -->
+          <div class="relative h-28 w-full flex items-center justify-center">
+            <svg class="w-full h-full overflow-visible" viewBox="0 0 400 110" preserveAspectRatio="none">
+              <defs>
+                <linearGradient id="cableGradConnected" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stop-color="#00F0FF" stop-opacity="0.85" />
+                  <stop offset="50%" stop-color="#38BDF8" stop-opacity="0.95" />
+                  <stop offset="100%" stop-color="#10B981" stop-opacity="0.85" />
+                </linearGradient>
+                <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="3.5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+
+              <!-- Outer Cable Sheath -->
+              <rect x="8" y="36" width="384" height="38" rx="19" fill="#0F172A" stroke="#1E293B" stroke-width="2" />
+
+              <!-- TX Channel (Client -> Server, Upper Track) -->
+              <line id="txTrackBase" x1="20" y1="47" x2="380" y2="47" stroke="#1E293B" stroke-width="3" stroke-linecap="round" />
+              <line id="txTrackActive" x1="20" y1="47" x2="380" y2="47" stroke="url(#cableGradConnected)" stroke-width="3" stroke-linecap="round" class="opacity-0 transition-opacity duration-500 cable-flow-right" filter="url(#neonGlow)" />
+
+              <!-- RX Channel (Server -> Client, Lower Track) -->
+              <line id="rxTrackBase" x1="20" y1="63" x2="380" y2="63" stroke="#1E293B" stroke-width="3" stroke-linecap="round" />
+              <line id="rxTrackActive" x1="20" y1="63" x2="380" y2="63" stroke="url(#cableGradConnected)" stroke-width="3" stroke-linecap="round" class="opacity-0 transition-opacity duration-500 cable-flow-left" filter="url(#neonGlow)" />
+
+              <!-- Left & Right RJ45 Plugs -->
+              <rect x="0" y="32" width="16" height="46" rx="4" fill="#0284C7" stroke="#38BDF8" stroke-width="1.5" />
+              <rect x="384" y="32" width="16" height="46" rx="4" fill="#059669" stroke="#34D399" stroke-width="1.5" />
+            </svg>
+
+            <!-- Dynamic Flying Packets Overlay Container -->
+            <div id="flyingPacketsLayer" class="absolute inset-0 pointer-events-none"></div>
+          </div>
+
+          <!-- Live Packet Caption Bar -->
+          <div id="livePacketBanner" class="mt-2 px-3 py-2 rounded-lg bg-slate-900/90 border border-slate-800 text-xs font-mono flex items-center justify-between">
+            <span class="text-slate-400">当前帧透视:</span>
+            <span id="livePacketDesc" class="text-cyan-300 font-semibold truncate ml-2">尚未建立连接，点击左侧「连接服务端」观察三次握手</span>
+          </div>
+        </div>
+
+        <!-- Beginner Visual Guide / What Happened Step-by-Step -->
+        <div class="bg-slate-900/75 border border-slate-800/90 rounded-lg p-3 z-10">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-[11px] font-semibold text-cyan-300 flex items-center gap-1.5">
+              <span>💡 小白实时解说员 (TCP 行为白话翻译)</span>
+            </span>
+            <span id="ServerCounterPill" class="text-[11px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">服务端被请求次数: 0</span>
+          </div>
+          <p id="beginnerExplanationText" class="text-xs text-slate-300 leading-relaxed">
+            服务端已经在 <code class="text-emerald-300 font-mono">127.0.0.1:9527</code> 自动启动监听 (<code class="text-emerald-300 font-mono">LISTEN</code>)。当你点击左侧连接按钮，客户端会先拨打三次“确认眼神”的电话（SYN → SYN+ACK → ACK），网线随即亮起通电，然后自动把 <code class="text-cyan-300 font-mono">hello</code> 塞进 TCP 载荷发过去！
+          </p>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: TCP SERVER (4 cols) -->
+      <div id="serverPanel" class="lg:col-span-4 bg-[#0D1322]/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between transition-all duration-300">
+        <div>
+          <!-- Header & State Badge -->
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-3 mb-3">
+            <div class="flex items-center gap-2.5">
+              <span class="w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_10px_#10B981]"></span>
+              <div>
+                <h2 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+                  TCP 服务端 (Server)
+                  <span class="text-[11px] font-mono text-emerald-400 bg-emerald-950/70 border border-emerald-800/60 px-1.5 py-0.5 rounded">127.0.0.1:9527</span>
+                </h2>
+                <p class="text-[11px] text-slate-400">自动监听端口 · 自动回执第 N 次响应数字</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="text-[10px] font-mono uppercase text-slate-400">状态机 (FSM)</div>
+              <div id="serverStateBadge" class="inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">LISTEN</div>
+            </div>
+          </div>
+
+          <!-- Server Internal TCP Registers -->
+          <div class="grid grid-cols-4 gap-2 mb-3 bg-slate-950/70 p-2.5 rounded-lg border border-slate-800/80 font-mono">
+            <div>
+              <div class="text-[10px] text-slate-400">SND.NXT (Seq)</div>
+              <div id="serverSeqVal" class="text-xs font-bold text-emerald-300">0 (Rel)</div>
+              <div id="serverRawSeqVal" class="text-[10px] text-slate-500">ISN: --</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400">RCV.NXT (Ack)</div>
+              <div id="serverAckVal" class="text-xs font-bold text-cyan-300">0 (Rel)</div>
+              <div class="text-[10px] text-slate-500">期望收序号</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400">RCV.WND</div>
+              <div id="serverWinVal" class="text-xs font-bold text-amber-300">65535 B</div>
+              <div class="text-[10px] text-slate-500">接收窗口</div>
+            </div>
+            <div>
+              <div class="text-[10px] text-slate-400">响应计数器</div>
+              <div id="serverHitCounter" class="text-xs font-bold text-emerald-400">#0 次</div>
+              <div class="text-[10px] text-slate-500">自动递增回执</div>
+            </div>
+          </div>
+
+          <!-- Server Auto-Reply Rule Banner -->
+          <div class="mb-3 px-3 py-2 rounded-lg bg-emerald-950/30 border border-emerald-800/40 flex items-center justify-between text-xs">
+            <span class="text-slate-300">自动应答策略: 收到客户端第 <b class="text-emerald-300">N</b> 次消息，自动回复数字 <code class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 font-mono">N</code></span>
+            <span class="text-[10px] font-mono text-emerald-400">● 守护进程运行中</span>
+          </div>
+
+          <!-- Server Application Log -->
+          <div class="mb-3">
+            <div class="flex items-center justify-between text-[11px] text-slate-400 mb-1 font-mono">
+              <span>服务端收发缓冲区 (Socket Stream)</span>
+              <button id="clearServerLogBtn" class="hover:text-slate-200">清空视图</button>
+            </div>
+            <div id="serverStreamBox" class="h-32 overflow-y-auto rounded-lg bg-slate-950/90 border border-slate-800/90 p-2.5 font-mono text-xs space-y-1.5">
+              <div class="text-emerald-400/90 text-[11px]">[SYS] 服务端已在 127.0.0.1:9527 自动启动并进入 LISTEN 状态，等待客户端连接...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Server Active Push Input -->
+        <div class="pt-2 border-t border-slate-800/80">
+          <label class="block text-[11px] text-slate-400 mb-1.5 font-mono">服务端主动向客户端推送消息 (全双工通信):</label>
+          <div class="flex gap-2">
+            <input id="serverInput" type="text" value="server_push_01" placeholder="服务端也可随时主动发数据给客户端..." disabled class="flex-1 bg-slate-900 border border-slate-700/80 rounded-lg px-3 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-emerald-400 disabled:opacity-40" />
+            <button id="serverSendBtn" disabled class="px-4 py-2 rounded-lg text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30 disabled:opacity-30 disabled:pointer-events-none transition whitespace-nowrap">
+              ← 服务端发送
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Lower Section: Hardcore TCP Full-Picture Dissector & Packet History -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-stretch flex-1">
+
+      <!-- Left Bottom (7 cols): Historical Packet Sequence Table & Ladder Filter -->
+      <div class="lg:col-span-7 bg-[#0D1322]/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <div>
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-800/80">
+            <div>
+              <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+                <span>📡 TCP 报文全貌历史记录 (Packet Capture History)</span>
+                <span id="packetTotalBadge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-cyan-300">共 0 帧</span>
+              </h3>
+              <p class="text-[11px] text-slate-400">点击任意一行报文，右侧立即解剖该帧的 20 字节 TCP 首部、标志位寄存器与原始 Hex 字节数组</p>
+            </div>
+
+            <!-- Filter Pills -->
+            <div class="flex items-center gap-1.5 text-xs font-mono">
+              <button data-filter="ALL" class="pkt-filter-btn px-2.5 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">全部</button>
+              <button data-filter="HANDSHAKE" class="pkt-filter-btn px-2.5 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">握手/挥手</button>
+              <button data-filter="DATA" class="pkt-filter-btn px-2.5 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200">载荷传输 (PSH)</button>
+              <button id="resetAllBtn" class="ml-1 px-2.5 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700">重置实验</button>
+            </div>
+          </div>
+
+          <!-- Packet Table -->
+          <div class="overflow-x-auto max-h-[310px] overflow-y-auto rounded-lg border border-slate-800/90 bg-slate-950/60">
+            <table class="w-full text-left border-collapse font-mono text-xs">
+              <thead class="bg-slate-900/95 text-[11px] text-slate-400 sticky top-0 z-10 border-b border-slate-800">
+                <tr>
+                  <th class="py-2 px-2.5">#</th>
+                  <th class="py-2 px-2">时间戳</th>
+                  <th class="py-2 px-2">流向</th>
+                  <th class="py-2 px-2">Flags (控制位)</th>
+                  <th class="py-2 px-2">Seq (相对/真实)</th>
+                  <th class="py-2 px-2">Ack</th>
+                  <th class="py-2 px-2 text-right">Len</th>
+                  <th class="py-2 px-2.5">载荷预览 / 语义解读</th>
+                </tr>
+              </thead>
+              <tbody id="packetTableBody" class="divide-y divide-slate-800/60">
+                <tr>
+                  <td colspan="8" class="py-10 text-center text-slate-500">
+                    暂无捕获的 TCP 报文帧 — 请点击左上方「点击连接服务端」触发三次握手与首次数据传输
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Bottom Seq/Ack Formula Bar -->
+        <div class="mt-3 pt-2.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-slate-400">
+          <div>
+            <span class="text-cyan-400 font-bold">核心黄金定律:</span>
+            <span>下一包 <code class="text-slate-200">Seq</code> = 当前 <code class="text-slate-200">Seq</code> + <code class="text-amber-300">Payload字节长度</code> (注: SYN 和 FIN 标志虽然载荷为 0，但逻辑上各消耗 1 个序号!)</span>
+          </div>
+          <span id="selectedPktSummary" class="text-emerald-400">未选中帧</span>
+        </div>
+      </div>
+
+      <!-- Right Bottom (5 cols): Deep Bit-Level TCP Header & Hex Dump Dissector -->
+      <div class="lg:col-span-5 bg-[#0D1322]/90 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80">
+            <div>
+              <h3 class="font-bold text-sm text-slate-100 flex items-center gap-2">
+                <span>🔬 底层真实数据原貌解剖器 (RFC 9293 Frame Dissector)</span>
+              </h3>
+              <p class="text-[11px] text-slate-400">鼠标悬停下方协议字段，自动联动高亮最底部的真实 16 进制网络字节序 (Big-Endian)</p>
+            </div>
+            <span id="dissectorFrameBadge" class="text-xs font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">等待选帧</span>
+          </div>
+
+          <!-- 32-Bit Standard RFC 9293 TCP Header Grid -->
+          <div class="mb-3">
+            <div class="flex justify-between text-[10px] font-mono text-slate-500 px-1 mb-1">
+              <span>Bit 0</span>
+              <span>Bit 15</span>
+              <span>Bit 16</span>
+              <span>Bit 31 (4 Bytes / Row)</span>
+            </div>
+
+            <div id="rfcHeaderGrid" class="grid grid-cols-12 gap-1 font-mono text-[11px] bg-slate-950 p-2 rounded-lg border border-slate-800">
+              <!-- Row 1: Src Port (16) | Dst Port (16) -->
+              <div data-byte-range="0,1" class="hdr-field col-span-6 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition">
+                <div class="text-[9px] text-slate-400">Source Port (16 bits) [B0..1]</div>
+                <div id="hdrSrcPort" class="font-bold text-cyan-300">--</div>
+              </div>
+              <div data-byte-range="2,3" class="hdr-field col-span-6 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition">
+                <div class="text-[9px] text-slate-400">Destination Port (16 bits) [B2..3]</div>
+                <div id="hdrDstPort" class="font-bold text-emerald-300">--</div>
+              </div>
+
+              <!-- Row 2: Sequence Number (32) -->
+              <div data-byte-range="4,7" class="hdr-field col-span-12 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition flex items-center justify-between">
+                <div>
+                  <span class="text-[9px] text-slate-400 block">Sequence Number (32 bits) [B4..7]</span>
+                  <span id="hdrSeqNum" class="font-bold text-cyan-300">--</span>
+                </div>
+                <span id="hdrSeqHex" class="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded">0x--------</span>
+              </div>
+
+              <!-- Row 3: Acknowledgment Number (32) -->
+              <div data-byte-range="8,11" class="hdr-field col-span-12 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition flex items-center justify-between">
+                <div>
+                  <span class="text-[9px] text-slate-400 block">Acknowledgment Number (32 bits) [B8..11]</span>
+                  <span id="hdrAckNum" class="font-bold text-emerald-300">--</span>
+                </div>
+                <span id="hdrAckHex" class="text-[10px] text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded">0x--------</span>
+              </div>
+
+              <!-- Row 4: Data Offset (4) + Reserved (4) + Flags (8) | Window Size (16) -->
+              <div data-byte-range="12,13" class="hdr-field col-span-6 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition">
+                <div class="text-[9px] text-slate-400">HdrLen(4b) + Flags(8b) [B12..13]</div>
+                <div id="hdrFlagsBits" class="font-bold text-amber-300 flex flex-wrap gap-1 mt-0.5">
+                  <span class="px-1 rounded bg-slate-800 text-slate-500 text-[10px]">SYN:0</span>
+                  <span class="px-1 rounded bg-slate-800 text-slate-500 text-[10px]">ACK:0</span>
+                  <span class="px-1 rounded bg-slate-800 text-slate-500 text-[10px]">PSH:0</span>
+                  <span class="px-1 rounded bg-slate-800 text-slate-500 text-[10px]">FIN:0</span>
+                </div>
+              </div>
+              <div data-byte-range="14,15" class="hdr-field col-span-6 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition">
+                <div class="text-[9px] text-slate-400">Window Size (16 bits) [B14..15]</div>
+                <div id="hdrWindow" class="font-bold text-amber-200">--</div>
+              </div>
+
+              <!-- Row 5: Checksum (16) | Urgent Pointer (16) -->
+              <div data-byte-range="16,17" class="hdr-field col-span-6 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition">
+                <div class="text-[9px] text-slate-400">Checksum (16 bits) [B16..17]</div>
+                <div id="hdrChecksum" class="font-bold text-purple-300">--</div>
+              </div>
+              <div data-byte-range="18,19" class="hdr-field col-span-6 p-1.5 rounded bg-slate-900/90 border border-slate-800 hover:border-cyan-400 cursor-pointer transition">
+                <div class="text-[9px] text-slate-400">Urgent Pointer (16 bits) [B18..19]</div>
+                <div id="hdrUrgent" class="font-bold text-slate-400">0x0000 (0)</div>
+              </div>
+
+              <!-- Row 6: Application Payload -->
+              <div data-byte-range="20,999" id="hdrPayloadBox" class="hdr-field col-span-12 p-1.5 rounded bg-cyan-950/30 border border-cyan-800/50 hover:border-cyan-400 cursor-pointer transition">
+                <div class="flex justify-between text-[9px] text-cyan-300">
+                  <span>Application Payload (TCP 真实数据载荷) [B20..N]</span>
+                  <span id="hdrPayloadLen">0 Bytes</span>
+                </div>
+                <div id="hdrPayloadText" class="font-bold text-slate-100 truncate mt-0.5">无应用层载荷 (纯控制报文)</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Raw Hex & Binary Dump Viewer -->
+          <div>
+            <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1">
+              <span>原始字节流 (Hex Dump | 前 20B 为 TCP Header，后续为 Payload)</span>
+              <span id="hoveredByteInfo" class="text-cyan-400">悬停字段或字节查看偏移</span>
+            </div>
+            <div id="hexDumpContainer" class="bg-slate-950 border border-slate-800 rounded-lg p-2.5 font-mono text-xs leading-relaxed min-h-[88px] max-h-[120px] overflow-y-auto grid grid-cols-1 md:grid-cols-12 gap-2">
+              <div class="md:col-span-12 text-slate-500 text-center py-4">选中左侧任意一条 TCP 报文后，这里将展示每一个字节的 16 进制与 ASCII 真容</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+
+  <script>
+    // =========================================================================
+    // 了不起的 TCP (Awesome TCP) — 核心状态机与真实 RFC 9293 报文构造引擎
+    // =========================================================================
+
+    const state = {
+      connected: false,
+      connecting: false,
+      closing: false,
+      clientState: 'CLOSED',
+      serverState: 'LISTEN',
+      clientPort: 54321,
+      serverPort: 9527,
+      // Initial Sequence Numbers (ISN)
+      clientISN: 1842901000,
+      serverISN: 3910452000,
+      // Current Sequence & Acknowledge Numbers (Relative to ISN)
+      clientRelSeq: 0,
+      clientRelAck: 0,
+      serverRelSeq: 0,
+      serverRelAck: 0,
+      clientBytesSent: 0,
+      clientBytesRecv: 0,
+      serverRequestCount: 0,
+      // Controls
+      animDurationMs: 1100, // Default slow educational speed
+      simulateDropNext: false,
+      soundEnabled: true,
+      filterMode: 'ALL',
+      packets: [],
+      selectedPacketId: null,
+      pktCounter: 0
+    };
+
+    // Web Audio Synthesizer for subtle cyber telemetry feedback
+    let audioCtx = null;
+    function playBeep(freq = 520, duration = 0.06, type = 'sine') {
+      if (!state.soundEnabled) return;
+      try {
+        if (!audioCtx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) audioCtx = new AudioContextClass();
+        }
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {
+        // Ignore audio context restrictions
+      }
+    }
+
+    // Format Timestamp HH:MM:SS.mmm
+    function nowTimeStr() {
+      const d = new Date();
+      const pad = (n, w = 2) => String(n).padStart(w, '0');
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+    }
+
+    // Encode UTF-8 string to Uint8Array
+    function strToBytes(str) {
+      return new TextEncoder().encode(str || '');
+    }
+
+    // Build genuine 20-byte RFC 9293 TCP Header + Payload bytes
+    function buildRawTcpFrame({ srcPort, dstPort, rawSeq, rawAck, flags, windowSize, payloadBytes }) {
+      const totalLen = 20 + payloadBytes.length;
+      const buf = new Uint8Array(totalLen);
+      const view = new DataView(buf.buffer);
+
+      view.setUint16(0, srcPort, false); // Big-endian Source Port
+      view.setUint16(2, dstPort, false); // Big-endian Destination Port
+      view.setUint32(4, rawSeq >>> 0, false); // 32-bit Sequence Number
+      view.setUint32(8, rawAck >>> 0, false); // 32-bit Ack Number
+
+      // Data Offset (5 words = 20 bytes -> 0x50)
+      buf[12] = 0x50;
+      let flagByte = 0;
+      if (flags.FIN) flagByte |= 0x01;
+      if (flags.SYN) flagByte |= 0x02;
+      if (flags.RST) flagByte |= 0x04;
+      if (flags.PSH) flagByte |= 0x08;
+      if (flags.ACK) flagByte |= 0x10;
+      if (flags.URG) flagByte |= 0x20;
+      buf[13] = flagByte;
+
+      view.setUint16(14, windowSize, false);
+      view.setUint16(16, 0, false); // Checksum placeholder
+      view.setUint16(18, 0, false); // Urgent pointer
+
+      for (let i = 0; i < payloadBytes.length; i++) {
+        buf[20 + i] = payloadBytes[i];
+      }
+
+      // Compute 16-bit Ones' Complement Checksum over pseudo-header + TCP segment
+      let sum = 0x7F00 + 0x0001 + 0x7F00 + 0x0001 + 0x0006 + totalLen;
+      for (let i = 0; i < totalLen; i += 2) {
+        const word = (buf[i] << 8) | (i + 1 < totalLen ? buf[i + 1] : 0);
+        sum += word;
+        while (sum > 0xFFFF) {
+          sum = (sum & 0xFFFF) + (sum >>> 16);
+        }
+      }
+      const checksum = (~sum) & 0xFFFF;
+      view.setUint16(16, checksum, false);
+
+      return { rawBytes: buf, checksum, flagByte };
+    }
+
+    // Update top & side TCP registers and FSM badges
+    function updateRegistersUI() {
+      document.getElementById('clientStateBadge').textContent = state.clientState;
+      document.getElementById('serverStateBadge').textContent = state.serverState;
+
+      // Color coding for client state
+      const cBadge = document.getElementById('clientStateBadge');
+      if (state.clientState === 'ESTABLISHED') {
+        cBadge.className = 'inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
+      } else if (state.clientState === 'CLOSED') {
+        cBadge.className = 'inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-slate-800 text-slate-400 border border-slate-700';
+      } else {
+        cBadge.className = 'inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+      }
+
+      // Color coding for server state
+      const sBadge = document.getElementById('serverStateBadge');
+      if (state.serverState === 'ESTABLISHED') {
+        sBadge.className = 'inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-400/50';
+      } else {
+        sBadge.className = 'inline-block mt-0.5 px-2 py-0.5 rounded text-xs font-mono font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+      }
+
+      document.getElementById('clientAddrBadge').textContent = state.connected || state.connecting
+        ? `127.0.0.1:${state.clientPort}`
+        : '127.0.0.1:----';
+
+      document.getElementById('clientSeqVal').textContent = `${state.clientRelSeq} (Rel)`;
+      document.getElementById('clientRawSeqVal').textContent = `ISN+${state.clientRelSeq}`;
+      document.getElementById('clientAckVal').textContent = `${state.clientRelAck} (Rel)`;
+      document.getElementById('clientBytesStat').textContent = `${state.clientBytesSent} / ${state.clientBytesRecv} B`;
+
+      document.getElementById('serverSeqVal').textContent = `${state.serverRelSeq} (Rel)`;
+      document.getElementById('serverRawSeqVal').textContent = `ISN+${state.serverRelSeq}`;
+      document.getElementById('serverAckVal').textContent = `${state.serverRelAck} (Rel)`;
+      document.getElementById('serverHitCounter').textContent = `#${state.serverRequestCount} 次`;
+      document.getElementById('ServerCounterPill').textContent = `服务端被请求次数: ${state.serverRequestCount}`;
+
+      // Cable appearance
+      const txActive = document.getElementById('txTrackActive');
+      const rxActive = document.getElementById('rxTrackActive');
+      const cableDot = document.getElementById('cableStatusDot');
+      const cableTitle = document.getElementById('cableStatusTitle');
+      const clientPanel = document.getElementById('clientPanel');
+      const serverPanel = document.getElementById('serverPanel');
+
+      if (state.connected) {
+        txActive.classList.remove('opacity-0');
+        rxActive.classList.remove('opacity-0');
+        cableDot.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#00F0FF]';
+        cableTitle.textContent = '物理网线状态: 已连通 (ESTABLISHED 全双工信道激活)';
+        cableTitle.className = 'text-xs font-mono font-bold text-cyan-300';
+        clientPanel.classList.add('glow-cyan');
+        serverPanel.classList.add('glow-emerald');
+      } else {
+        txActive.classList.add('opacity-0');
+        rxActive.classList.add('opacity-0');
+        cableDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-600';
+        cableTitle.textContent = state.connecting ? '物理网线状态: 正在三次握手协商参数...' : '物理网线状态: 未插通 (等待握手)';
+        cableTitle.className = 'text-xs font-mono font-bold text-slate-300';
+        clientPanel.classList.remove('glow-cyan');
+        serverPanel.classList.remove('glow-emerald');
+      }
+
+      // Buttons & Inputs
+      const connectBtn = document.getElementById('clientConnectBtn');
+      const connectBtnText = document.getElementById('clientConnectBtnText');
+      const closeBtn = document.getElementById('clientCloseBtn');
+      const clientInput = document.getElementById('clientInput');
+      const clientSendBtn = document.getElementById('clientSendBtn');
+      const serverInput = document.getElementById('serverInput');
+      const serverSendBtn = document.getElementById('serverSendBtn');
+      const promptHint = document.getElementById('connectPromptHint');
+
+      if (state.connected) {
+        connectBtn.disabled = true;
+        connectBtn.classList.add('opacity-40', 'pointer-events-none');
+        connectBtnText.textContent = 'TCP 长连接已建立 (ESTABLISHED)';
+        closeBtn.disabled = false;
+        clientInput.disabled = false;
+        clientSendBtn.disabled = false;
+        serverInput.disabled = false;
+        serverSendBtn.disabled = false;
+        promptHint.classList.add('hidden');
+      } else if (state.connecting || state.closing) {
+        connectBtn.disabled = true;
+        connectBtn.classList.add('opacity-40', 'pointer-events-none');
+        closeBtn.disabled = true;
+        clientInput.disabled = true;
+        clientSendBtn.disabled = true;
+        serverInput.disabled = true;
+        serverSendBtn.disabled = true;
+      } else {
+        connectBtn.disabled = false;
+        connectBtn.classList.remove('opacity-40', 'pointer-events-none');
+        connectBtnText.textContent = '点击连接服务端 (三次握手 + 自动发 hello)';
+        closeBtn.disabled = true;
+        clientInput.disabled = true;
+        clientSendBtn.disabled = true;
+        serverInput.disabled = true;
+        serverSendBtn.disabled = true;
+        promptHint.classList.remove('hidden');
+      }
+    }
+
+    // Append message to Client or Server Socket Stream box
+    function appendStreamLog(side, tag, text, colorClass = 'text-slate-200') {
+      const box = document.getElementById(side === 'client' ? 'clientStreamBox' : 'serverStreamBox');
+      if (box.querySelector('.italic')) box.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = `flex items-start gap-2 ${colorClass}`;
+      row.innerHTML = `<span class="text-[10px] text-slate-500 shrink-0">[${nowTimeStr().slice(0, 8)}]</span><span class="px-1 rounded bg-slate-800 text-[10px] shrink-0">${tag}</span><span class="break-all">${text}</span>`;
+      box.appendChild(row);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Animate a packet flying across the physical cable
+    function animateCablePacket({ direction, label, subLabel, flagsStr, isDropped = false }) {
+      return new Promise((resolve) => {
+        const layer = document.getElementById('flyingPacketsLayer');
+        const badge = document.getElementById('inFlightCountBadge');
+        const liveDesc = document.getElementById('livePacketDesc');
+
+        const isC2S = direction === 'C2S';
+        badge.textContent = isC2S ? '⚡ 数据流向: 客户端 ➔ 服务端' : '⚡ 数据流向: 服务端 ➔ 客户端';
+        badge.className = isC2S
+          ? 'px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-500/50 text-cyan-300 font-semibold'
+          : 'px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-semibold';
+
+        liveDesc.textContent = `${isC2S ? '[C→S]' : '[S→C]'} ${flagsStr} | ${label} (${subLabel})`;
+
+        const pill = document.createElement('div');
+        const topPos = isC2S ? '8px' : '58px';
+        const borderCol = isDropped
+          ? 'border-rose-500 bg-rose-950/95 text-rose-200 shadow-[0_0_15px_#F43F5E]'
+          : isC2S
+          ? 'border-cyan-400 bg-cyan-950/95 text-cyan-200 shadow-[0_0_15px_#00F0FF]'
+          : 'border-emerald-400 bg-emerald-950/95 text-emerald-200 shadow-[0_0_15px_#10B981]';
+
+        pill.className = `absolute px-2.5 py-1 rounded-md border text-[11px] font-mono font-bold whitespace-nowrap transition-all ease-linear flex items-center gap-1.5 ${borderCol}`;
+        pill.style.top = topPos;
+        pill.style.left = isC2S ? '4%' : '76%';
+        pill.style.transitionDuration = `${state.animDurationMs}ms`;
+        pill.innerHTML = `<span>${isC2S ? '➔' : '⬅'} ${flagsStr}</span><span class="text-[10px] opacity-80">${label}</span>`;
+
+        layer.appendChild(pill);
+        playBeep(isC2S ? 580 : 740, 0.05, 'triangle');
+
+        // Trigger position transition on next frame
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (isDropped) {
+              pill.style.left = '42%';
+            } else {
+              pill.style.left = isC2S ? '76%' : '4%';
+            }
+          });
+        });
+
+        setTimeout(() => {
+          if (isDropped) {
+            pill.innerHTML = `<span>💥 报文半路丢失 (DROP)! 等待超时重传...</span>`;
+            playBeep(190, 0.18, 'sawtooth');
+            setTimeout(() => {
+              pill.remove();
+              resolve();
+            }, 650);
+          } else {
+            pill.remove();
+            badge.textContent = state.connected ? '信道已连通 · 待命' : '信道空闲';
+            badge.className = 'px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-300';
+            resolve();
+          }
+        }, state.animDurationMs);
+      });
+    }
+
+    // Record and dissect a TCP Frame
+    async function transmitTcpSegment({
+      direction,
+      flags,
+      payloadText = '',
+      category = 'DATA',
+      note = '',
+      isRetransmission = false
+    }) {
+      const isC2S = direction === 'C2S';
+      const srcPort = isC2S ? state.clientPort : state.serverPort;
+      const dstPort = isC2S ? state.serverPort : state.clientPort;
+      const relSeq = isC2S ? state.clientRelSeq : state.serverRelSeq;
+      const relAck = isC2S ? state.clientRelAck : state.serverRelAck;
+      const rawSeq = (isC2S ? state.clientISN : state.serverISN) + relSeq;
+      const rawAck = flags.ACK ? ((isC2S ? state.serverISN : state.clientISN) + relAck) : 0;
+
+      const payloadBytes = strToBytes(payloadText);
+      const windowSize = 65535;
+
+      const flagNames = Object.keys(flags).filter((k) => flags[k]);
+      const flagsStr = `[${flagNames.join(', ')}]`;
+
+      // Check if chaos drop mode is armed for DATA packets
+      let droppedThisTime = false;
+      if (state.simulateDropNext && category === 'DATA' && !isRetransmission) {
+        droppedThisTime = true;
+        state.simulateDropNext = false;
+        updateChaosButtonUI();
+      }
+
+      const { rawBytes, checksum, flagByte } = buildRawTcpFrame({
+        srcPort,
+        dstPort,
+        rawSeq,
+        rawAck,
+        flags,
+        windowSize,
+        payloadBytes
+      });
+
+      state.pktCounter += 1;
+      const pkt = {
+        id: state.pktCounter,
+        timestamp: nowTimeStr(),
+        direction,
+        srcPort,
+        dstPort,
+        flags,
+        flagsStr,
+        flagByte,
+        relSeq,
+        relAck: flags.ACK ? relAck : 0,
+        rawSeq,
+        rawAck,
+        payloadLen: payloadBytes.length,
+        payloadText,
+        payloadBytes,
+        windowSize,
+        checksum,
+        rawBytes,
+        category,
+        note: droppedThisTime ? `❌ [模拟网卡丢包] 报文在网线中丢失，对端未收到，即将触发 TCP RTO 重传!` : note,
+        dropped: droppedThisTime,
+        retrans: isRetransmission
+      };
+
+      state.packets.push(pkt);
+      renderPacketTable();
+      selectPacket(pkt.id);
+
+      // Animate on the physical network cable
+      const shortPayload = payloadText ? `"${payloadText}" (${payloadBytes.length}B)` : `Len=0`;
+      await animateCablePacket({
+        direction,
+        label: shortPayload,
+        subLabel: `Seq=${relSeq} Ack=${flags.ACK ? relAck : '-'}`,
+        flagsStr: isRetransmission ? `[重传 ${ flagNames.join('+') }]` : flagsStr,
+        isDropped: droppedThisTime
+      });
+
+      // If dropped, automatically trigger TCP Retransmission!
+      if (droppedThisTime) {
+        document.getElementById('beginnerExplanationText').innerHTML =
+          `⚠️ <b class="text-amber-300">触发 TCP 超时重传机制 (RTO)！</b> 刚才发出的 <code class="text-rose-300 font-mono">Seq=${relSeq}</code> 数据包在网线中意外丢失，发送方迟迟没收到对端的 ACK 确认，因此内核直接从发送缓冲区取出原封不动的序号与字节进行<b>自动重传</b>！`;
+        await transmitTcpSegment({
+          direction,
+          flags,
+          payloadText,
+          category,
+          note: `♻️ [TCP RTO 超时重传] 使用完全相同的 Seq=${relSeq} 重新发送丢失的载荷 "${payloadText}"`,
+          isRetransmission: true
+        });
+        return;
+      }
+
+      // Advance sequence numbers according to RFC 9293 rules:
+      // SYN and FIN each consume 1 sequence number; payload consumes payloadBytes.length
+      let seqAdvance = payloadBytes.length;
+      if (flags.SYN || flags.FIN) seqAdvance += 1;
+
+      if (isC2S) {
+        state.clientRelSeq += seqAdvance;
+        state.serverRelAck = state.clientRelSeq;
+        state.clientBytesSent += payloadBytes.length;
+      } else {
+        state.serverRelSeq += seqAdvance;
+        state.clientRelAck = state.serverRelSeq;
+        state.clientBytesRecv += payloadBytes.length;
+      }
+
+      updateRegistersUI();
+    }
+
+    // Perform 3-Way Handshake + Auto send "hello" + Server replies hit count "1"
+    async function handleConnectAndAutoHello() {
+      if (state.connected || state.connecting) return;
+      state.connecting = true;
+      notifyGoBackend('/api/connect', {});
+      state.clientPort = Math.floor(49152 + Math.random() * 14000);
+      state.clientISN = Math.floor(1000000000 + Math.random() * 2000000000);
+      state.serverISN = Math.floor(1000000000 + Math.random() * 2000000000);
+      state.clientRelSeq = 0;
+      state.clientRelAck = 0;
+      state.serverRelSeq = 0;
+      state.serverRelAck = 0;
+
+      // Step 1: SYN
+      state.clientState = 'SYN_SENT';
+      updateRegistersUI();
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 1 次握手 [SYN]：</b>客户端向服务端发送同步序列号请求 (<code class="text-cyan-300 font-mono">Seq=0, SYN=1</code>)，询问：“你好服务端，我想建立连接，我的初始序列号从 0 开始，你听得到吗？”`;
+      appendStreamLog('client', 'SYN', `向 127.0.0.1:9527 发起第一次握手 (SYN, Seq=0)`, 'text-cyan-300');
+
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { SYN: true },
+        category: 'HANDSHAKE',
+        note: '第一次握手 (SYN): 客户端同步初始序列号 ISN，消耗 1 个逻辑序号'
+      });
+
+      // Step 2: SYN + ACK
+      state.serverState = 'SYN_RCVD';
+      updateRegistersUI();
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 2 次握手 [SYN, ACK]：</b>服务端收到请求，回传 <code class="text-emerald-300 font-mono">Ack=1</code>（表示期待你下次从第 1 号字节发来），同时附上服务端自己的初始序号 <code class="text-emerald-300 font-mono">Seq=0, SYN=1</code>。`;
+      appendStreamLog('server', 'SYN+ACK', `收到客户端 SYN，回复第二次握手 (SYN+ACK, Seq=0, Ack=1)`, 'text-emerald-300');
+
+      await transmitTcpSegment({
+        direction: 'S2C',
+        flags: { SYN: true, ACK: true },
+        category: 'HANDSHAKE',
+        note: '第二次握手 (SYN+ACK): 服务端确认客户端序号(Ack=1)，并同步自身 ISN(Seq=0)'
+      });
+
+      // Step 3: ACK
+      state.clientState = 'ESTABLISHED';
+      state.serverState = 'ESTABLISHED';
+      state.connected = true;
+      state.connecting = false;
+      updateRegistersUI();
+
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 3 次握手 [ACK]：</b>客户端回传 <code class="text-cyan-300 font-mono">Ack=1</code> 确认服务端的序号。至此双方收发通道彻底打通，<b>物理网线亮起连接</b>，进入 <code class="text-cyan-300 font-mono">ESTABLISHED</code> 状态！`;
+      appendStreamLog('client', 'ACK', `发送第三次握手确认 (ACK, Seq=1, Ack=1) — 连接建立!`, 'text-cyan-300');
+      appendStreamLog('server', 'ESTAB', `三次握手完成，全双工 TCP 连接已建立!`, 'text-emerald-300');
+
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { ACK: true },
+        category: 'HANDSHAKE',
+        note: '第三次握手 (ACK): 客户端确认服务端 ISN(Ack=1)，三次握手圆满完成，网线接通!'
+      });
+
+      // Auto send default "hello" from Client to Server as requested
+      await sendClientPayload('hello', true);
+    }
+
+    // Send Client Message -> Server auto responds with hit count N
+    async function sendClientPayload(text, isAutoGreeting = false) {
+      if (!state.connected || !text) return;
+      if (!isAutoGreeting) notifyGoBackend('/api/client-send', { message: text });
+
+      const byteLen = strToBytes(text).length;
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `${isAutoGreeting ? '<b>连接后自动首发消息：</b>' : '<b>客户端发送数据：</b>'}客户端将字符串 <code class="text-cyan-300 font-mono">"${text}"</code> 封装为 ${byteLen} 字节载荷，设置 <code class="text-amber-300 font-mono">PSH+ACK</code> 标志推送上路，期望服务端立即交付应用层。`;
+
+      appendStreamLog('client', 'SEND', `发送 "${text}" (${byteLen} Bytes)`, 'text-cyan-200');
+
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { PSH: true, ACK: true },
+        payloadText: text,
+        category: 'DATA',
+        note: `${isAutoGreeting ? '[连接后默认发送] ' : ''}客户端发送 "${text}" (${byteLen}字节)，触发 PSH 立即推送标志`
+      });
+
+      appendStreamLog('server', 'RECV', `收到客户端数据: "${text}" (${byteLen} Bytes)`, 'text-slate-200');
+
+      // Server increments hit count and replies with the number (N)
+      state.serverRequestCount += 1;
+      const replyNumStr = String(state.serverRequestCount);
+      const replyLen = strToBytes(replyNumStr).length;
+
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>服务端自动计数响应：</b>服务端收到 <code class="text-cyan-300 font-mono">"${text}"</code>，将 <code class="text-emerald-300 font-mono">Ack</code> 推进了 ${byteLen}（确认收到这 ${byteLen} 个字节），并自动回传当前被请求次数数字 <code class="text-emerald-300 font-mono">"${replyNumStr}"</code>！`;
+
+      appendStreamLog('server', 'REPLY', `第 ${state.serverRequestCount} 次响应客户端，回传数字: "${replyNumStr}"`, 'text-emerald-300');
+
+      await transmitTcpSegment({
+        direction: 'S2C',
+        flags: { PSH: true, ACK: true },
+        payloadText: replyNumStr,
+        category: 'DATA',
+        note: `服务端自动回执客户端第 ${state.serverRequestCount} 次请求，内容为数字 "${replyNumStr}" (同时捎带确认 Ack=${state.serverRelAck})`
+      });
+
+      appendStreamLog('client', 'RECV', `收到服务端响应数字: "${replyNumStr}" (第 ${state.serverRequestCount} 次请求)`, 'text-emerald-200');
+
+      // Client sends pure ACK confirming receipt of server's response
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { ACK: true },
+        payloadText: '',
+        category: 'DATA',
+        note: `客户端收到服务端响应 "${replyNumStr}" 后回传纯 ACK 确认包 (Ack=${state.clientRelAck}, 载荷 0 字节)`
+      });
+    }
+
+    // Server actively sends message to Client
+    async function sendServerPayload(text) {
+      if (!state.connected || !text) return;
+      notifyGoBackend('/api/server-send', { message: text });
+      const byteLen = strToBytes(text).length;
+
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>服务端主动推送 (全双工特性)：</b>TCP 是全双工对等管道，服务端无需等待客户端提问，直接主动向网线写入 <code class="text-emerald-300 font-mono">"${text}"</code> (${byteLen} 字节)！`;
+
+      appendStreamLog('server', 'PUSH', `主动向客户端发送: "${text}" (${byteLen} Bytes)`, 'text-emerald-300');
+
+      await transmitTcpSegment({
+        direction: 'S2C',
+        flags: { PSH: true, ACK: true },
+        payloadText: text,
+        category: 'DATA',
+        note: `服务端主动向客户端推送消息 "${text}" (${byteLen}字节)`
+      });
+
+      appendStreamLog('client', 'RECV', `收到服务端主动推送: "${text}"`, 'text-cyan-200');
+
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { ACK: true },
+        payloadText: '',
+        category: 'DATA',
+        note: `客户端回传纯 ACK 确认收到服务端推送 (Ack=${state.clientRelAck})`
+      });
+    }
+
+    // 4-Way Wavehand Teardown
+    async function handleFourWayDisconnect() {
+      if (!state.connected || state.closing) return;
+      state.closing = true;
+      notifyGoBackend('/api/disconnect', {});
+      updateRegistersUI();
+
+      // 1. Client FIN+ACK
+      state.clientState = 'FIN_WAIT_1';
+      updateRegistersUI();
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 1 次挥手 [FIN, ACK]：</b>客户端发送 <code class="text-rose-300 font-mono">FIN=1</code> 结束报文，表示“我已经没有数据要发了”，但此时仍可接收服务端剩余数据。`;
+      appendStreamLog('client', 'FIN', `发起第一次挥手 (FIN+ACK)`, 'text-rose-300');
+
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { FIN: true, ACK: true },
+        category: 'HANDSHAKE',
+        note: '第一次挥手 (FIN+ACK): 客户端主动关闭发送通道，消耗 1 个逻辑序号'
+      });
+
+      // 2. Server ACK
+      state.clientState = 'FIN_WAIT_2';
+      state.serverState = 'CLOSE_WAIT';
+      updateRegistersUI();
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 2 次挥手 [ACK]：</b>服务端确认收到客户端的关闭请求，进入 <code class="text-amber-300 font-mono">CLOSE_WAIT</code> 状态。`;
+
+      await transmitTcpSegment({
+        direction: 'S2C',
+        flags: { ACK: true },
+        category: 'HANDSHAKE',
+        note: '第二次挥手 (ACK): 服务端确认客户端 FIN，进入半关闭 CLOSE_WAIT 状态'
+      });
+
+      // 3. Server FIN+ACK
+      state.serverState = 'LAST_ACK';
+      updateRegistersUI();
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 3 次挥手 [FIN, ACK]：</b>服务端也整理完收尾工作，发出自己的 <code class="text-rose-300 font-mono">FIN=1</code> 报文准备关闭。`;
+      appendStreamLog('server', 'FIN', `发送第三次挥手 (FIN+ACK)`, 'text-rose-300');
+
+      await transmitTcpSegment({
+        direction: 'S2C',
+        flags: { FIN: true, ACK: true },
+        category: 'HANDSHAKE',
+        note: '第三次挥手 (FIN+ACK): 服务端同意关闭连接，发送自身 FIN 标志'
+      });
+
+      // 4. Client ACK
+      state.clientState = 'CLOSED';
+      state.serverState = 'LISTEN';
+      state.connected = false;
+      state.closing = false;
+      updateRegistersUI();
+      document.getElementById('beginnerExplanationText').innerHTML =
+        `<b>第 4 次挥手 [ACK] 完成：</b>客户端回传最终确认包，连接彻底释放！服务端重新回到 <code class="text-emerald-300 font-mono">LISTEN</code> 待命状态，你可以再次点击左侧连接按钮开始新一轮实验。`;
+      appendStreamLog('client', 'CLOSED', `四次挥手完成，连接已关闭`, 'text-slate-400');
+      appendStreamLog('server', 'LISTEN', `连接已释放，继续在 9527 端口监听新连接...`, 'text-emerald-400');
+
+      await transmitTcpSegment({
+        direction: 'C2S',
+        flags: { ACK: true },
+        category: 'HANDSHAKE',
+        note: '第四次挥手 (ACK): 客户端发送最终 ACK，物理网线断开，服务端恢复 LISTEN'
+      });
+    }
+
+    // Render Historical Packet Table
+    function renderPacketTable() {
+      const tbody = document.getElementById('packetTableBody');
+      const totalBadge = document.getElementById('packetTotalBadge');
+      totalBadge.textContent = `共 ${state.packets.length} 帧`;
+
+      const filtered = state.packets.filter((p) => {
+        if (state.filterMode === 'ALL') return true;
+        return p.category === state.filterMode;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-slate-500">当前筛选条件下暂无报文帧</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = '';
+      filtered.forEach((p) => {
+        const tr = document.createElement('tr');
+        const isSelected = p.id === state.selectedPacketId;
+        const isC2S = p.direction === 'C2S';
+
+        let rowBg = isSelected
+          ? 'bg-cyan-500/20 border-l-2 border-l-cyan-400'
+          : 'hover:bg-slate-900/90';
+        if (p.dropped) rowBg = 'bg-rose-950/40 text-rose-300 hover:bg-rose-950/60';
+
+        tr.className = `cursor-pointer transition ${rowBg}`;
+        tr.addEventListener('click', () => selectPacket(p.id));
+
+        const dirBadge = isC2S
+          ? `<span class="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">C ➔ S</span>`
+          : `<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">S ➔ C</span>`;
+
+        let flagColor = 'text-amber-300';
+        if (p.flags.SYN) flagColor = 'text-cyan-300 font-bold';
+        if (p.flags.FIN) flagColor = 'text-rose-400 font-bold';
+        if (p.flags.PSH) flagColor = 'text-emerald-300 font-bold';
+
+        tr.innerHTML = `
+          <td class="py-2 px-2.5 font-bold text-slate-300">${p.id}</td>
+          <td class="py-2 px-2 text-slate-400">${p.timestamp}</td>
+          <td class="py-2 px-2">${dirBadge}</td>
+          <td class="py-2 px-2 ${flagColor}">${p.flagsStr}</td>
+          <td class="py-2 px-2 text-slate-200">${p.relSeq} <span class="text-[10px] text-slate-500">(${String(p.rawSeq).slice(-5)})</span></td>
+          <td class="py-2 px-2 text-slate-300">${p.flags.ACK ? p.relAck : '-'}</td>
+          <td class="py-2 px-2 text-right font-bold ${p.payloadLen > 0 ? 'text-cyan-300' : 'text-slate-500'}">${p.payloadLen} B</td>
+          <td class="py-2 px-2.5 text-slate-300 truncate max-w-[260px]">${p.payloadText ? `<code class="px-1 py-0.5 rounded bg-slate-900 text-cyan-200 mr-1.5">"${p.payloadText}"</code>` : ''}<span class="text-slate-400 text-[11px]">${p.note}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Scroll table to bottom on new packet
+      const container = tbody.parentElement.parentElement;
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Populate Right-Bottom RFC 9293 Dissector & Interactive Hex Dump
+    function selectPacket(pktId) {
+      const pkt = state.packets.find((x) => x.id === pktId);
+      if (!pkt) return;
+      state.selectedPacketId = pktId;
+      renderPacketTable();
+
+      document.getElementById('dissectorFrameBadge').textContent = `Frame #${pkt.id} (${pkt.rawBytes.length} Bytes)`;
+      document.getElementById('selectedPktSummary').textContent =
+        `当前选中 #${pkt.id}: ${pkt.direction === 'C2S' ? '客户端→服务端' : '服务端→客户端'} ${pkt.flagsStr} Seq=${pkt.relSeq} Len=${pkt.payloadLen}B`;
+
+      document.getElementById('hdrSrcPort').textContent = `${pkt.srcPort} (0x${pkt.srcPort.toString(16).toUpperCase().padStart(4, '0')})`;
+      document.getElementById('hdrDstPort').textContent = `${pkt.dstPort} (0x${pkt.dstPort.toString(16).toUpperCase().padStart(4, '0')})`;
+      document.getElementById('hdrSeqNum').textContent = `相对序号: ${pkt.relSeq} (真实32位: ${pkt.rawSeq >>> 0})`;
+      document.getElementById('hdrSeqHex').textContent = `0x${(pkt.rawSeq >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+
+      document.getElementById('hdrAckNum').textContent = pkt.flags.ACK
+        ? `相对确认: ${pkt.relAck} (真实32位: ${pkt.rawAck >>> 0})`
+        : `0 (未置位 ACK)`;
+      document.getElementById('hdrAckHex').textContent = `0x${(pkt.rawAck >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+
+      // Flags bit pills
+      const flagDefs = [
+        { key: 'URG', bit: 0x20 },
+        { key: 'ACK', bit: 0x10 },
+        { key: 'PSH', bit: 0x08 },
+        { key: 'RST', bit: 0x04 },
+        { key: 'SYN', bit: 0x02 },
+        { key: 'FIN', bit: 0x01 }
+      ];
+      const flagsContainer = document.getElementById('hdrFlagsBits');
+      flagsContainer.innerHTML = flagDefs
+        .map((f) => {
+          const on = (pkt.flagByte & f.bit) !== 0;
+          return `<span class="px-1.5 py-0.5 rounded text-[10px] ${
+            on ? 'bg-amber-500/25 text-amber-300 border border-amber-400/50 font-bold' : 'bg-slate-900 text-slate-600'
+          }">${f.key}:${on ? 1 : 0}</span>`;
+        })
+        .join('');
+
+      document.getElementById('hdrWindow').textContent = `${pkt.windowSize} Bytes (0x${pkt.windowSize.toString(16).toUpperCase()})`;
+      document.getElementById('hdrChecksum').textContent = `0x${pkt.checksum.toString(16).toUpperCase().padStart(4, '0')} (已校验)`;
+      document.getElementById('hdrPayloadLen').textContent = `${pkt.payloadLen} Bytes`;
+      document.getElementById('hdrPayloadText').textContent = pkt.payloadLen > 0
+        ? `UTF-8: "${pkt.payloadText}"`
+        : '无应用层载荷 (0 Bytes — 纯 TCP 协议控制帧)';
+
+      // Render Hex & ASCII Dump
+      const hexBox = document.getElementById('hexDumpContainer');
+      const hexSpans = [];
+      const asciiSpans = [];
+
+      for (let i = 0; i < pkt.rawBytes.length; i++) {
+        const b = pkt.rawBytes[i];
+        const hexStr = b.toString(16).toUpperCase().padStart(2, '0');
+        const isHeader = i < 20;
+        const colorCls = isHeader ? 'text-cyan-300' : 'text-emerald-300 font-bold';
+        hexSpans.push(
+          `<span data-byte-idx="${i}" class="hex-byte inline-block px-1 py-0.5 rounded cursor-pointer transition ${colorCls}" title="偏移 Byte ${i} | 二进制: ${b.toString(2).padStart(8, '0')}">${hexStr}</span>`
+        );
+        const ch = b >= 32 && b <= 126 ? String.fromCharCode(b) : '·';
+        asciiSpans.push(
+          `<span data-byte-idx="${i}" class="ascii-byte inline-block px-0.5 rounded ${isHeader ? 'text-slate-500' : 'text-emerald-300 font-bold'}">${ch}</span>`
+        );
+      }
+
+      hexBox.innerHTML = `
+        <div class="md:col-span-8 flex flex-wrap gap-0.5 items-center border-r border-slate-800/80 pr-2">${hexSpans.join('')}</div>
+        <div class="md:col-span-4 flex flex-wrap items-center pl-1 tracking-wider">${asciiSpans.join('')}</div>
+      `;
+
+      // Attach byte hover listeners
+      hexBox.querySelectorAll('.hex-byte').forEach((el) => {
+        el.addEventListener('mouseenter', () => {
+          const idx = Number(el.getAttribute('data-byte-idx'));
+          const b = pkt.rawBytes[idx];
+          document.getElementById('hoveredByteInfo').textContent =
+            `Byte [${idx}] = 0x${b.toString(16).toUpperCase().padStart(2, '0')} | Bin: ${b.toString(2).padStart(8, '0')} (${idx < 20 ? 'TCP首部' : '应用层Payload'})`;
+          highlightByteRange(idx, idx);
+        });
+        el.addEventListener('mouseleave', () => clearByteHighlights());
+      });
+    }
+
+    function highlightByteRange(startIdx, endIdx) {
+      document.querySelectorAll('#hexDumpContainer [data-byte-idx]').forEach((el) => {
+        const idx = Number(el.getAttribute('data-byte-idx'));
+        if (idx >= startIdx && idx <= endIdx) {
+          el.classList.add('byte-highlight');
+        } else {
+          el.classList.remove('byte-highlight');
+        }
+      });
+    }
+
+    function clearByteHighlights() {
+      document.querySelectorAll('#hexDumpContainer [data-byte-idx]').forEach((el) => {
+        el.classList.remove('byte-highlight');
+      });
+    }
+
+    function updateChaosButtonUI() {
+      const btn = document.getElementById('chaosDropBtn');
+      const dot = document.getElementById('chaosIndicator');
+      if (state.simulateDropNext) {
+        dot.className = 'w-2 h-2 rounded-full bg-rose-500 animate-ping';
+        btn.innerHTML = `<span id="chaosIndicator" class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span><span>模拟丢包重传: 已装填 (下一包必丢)</span>`;
+        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-mono border border-rose-500 bg-rose-500/20 text-rose-200 glow-amber transition flex items-center gap-1.5';
+      } else {
+        btn.innerHTML = `<span id="chaosIndicator" class="w-2 h-2 rounded-full bg-slate-500"></span><span>模拟丢包重传: 关</span>`;
+        btn.className = 'px-3 py-1.5 rounded-lg text-xs font-mono border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 transition flex items-center gap-1.5';
+      }
+    }
+
+
+    // =========================================================================
+    // Go 原生内核 Socket 桥接层 (当通过本地编译的 awesome_tcp 启动时自动激活)
+    // =========================================================================
+    state.goBackendActive = false;
+
+    async function probeGoBackend() {
+      const badge = document.getElementById('engineModeBadge');
+      if (window.location.protocol !== 'http:' && window.location.protocol !== 'https:') {
+        if (badge) badge.textContent = '🌐 浏览器内存协议栈模式';
+        return;
+      }
+      try {
+        const res = await fetch('/api/status', { method: 'GET' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.ok) {
+            state.goBackendActive = true;
+            if (badge) {
+              badge.textContent = '🟢 Go 原生内核 Socket 引擎已挂载 (:9527)';
+              badge.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/50 font-semibold';
+            }
+          }
+        }
+      } catch (_) {
+        if (badge) badge.textContent = '🌐 浏览器虚拟网卡模式 (本地运行 Go 二进制可激活真内核 Socket)';
+      }
+    }
+
+    async function notifyGoBackend(endpoint, payloadObj) {
+      if (!state.goBackendActive) return null;
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payloadObj || {})
+        });
+        if (res.ok) return await res.json();
+      } catch (_) {}
+      return null;
+    }
+
+    // Bind UI Controls
+    window.addEventListener('DOMContentLoaded', () => {
+      updateRegistersUI();
+      probeGoBackend();
+
+      // Connect button
+      document.getElementById('clientConnectBtn').addEventListener('click', () => {
+        handleConnectAndAutoHello();
+      });
+
+      // Disconnect button
+      document.getElementById('clientCloseBtn').addEventListener('click', () => {
+        handleFourWayDisconnect();
+      });
+
+      // Client Send
+      const triggerClientSend = () => {
+        const input = document.getElementById('clientInput');
+        const val = input.value.trim() || 'hello';
+        sendClientPayload(val, false);
+      };
+      document.getElementById('clientSendBtn').addEventListener('click', triggerClientSend);
+      document.getElementById('clientInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') triggerClientSend();
+      });
+
+      // Server Send
+      const triggerServerSend = () => {
+        const input = document.getElementById('serverInput');
+        const val = input.value.trim() || 'server_notice';
+        sendServerPayload(val);
+      };
+      document.getElementById('serverSendBtn').addEventListener('click', triggerServerSend);
+      document.getElementById('serverInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') triggerServerSend();
+      });
+
+      // Speed Controls
+      const setSpeed = (ms, activeId) => {
+        state.animDurationMs = ms;
+        ['speedSlowBtn', 'speedNormBtn', 'speedFastBtn'].forEach((id) => {
+          const el = document.getElementById(id);
+          if (id === activeId) {
+            el.className = 'px-2.5 py-1 rounded-md font-medium transition bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
+          } else {
+            el.className = 'px-2.5 py-1 rounded-md font-medium transition text-slate-400 hover:text-slate-200';
+          }
+        });
+      };
+      document.getElementById('speedSlowBtn').addEventListener('click', () => setSpeed(1100, 'speedSlowBtn'));
+      document.getElementById('speedNormBtn').addEventListener('click', () => setSpeed(620, 'speedNormBtn'));
+      document.getElementById('speedFastBtn').addEventListener('click', () => setSpeed(280, 'speedFastBtn'));
+
+      // Chaos Drop Toggle
+      document.getElementById('chaosDropBtn').addEventListener('click', () => {
+        state.simulateDropNext = !state.simulateDropNext;
+        updateChaosButtonUI();
+      });
+
+      // Nagle / Sticky Packet Demo
+      document.getElementById('nagleDemoBtn').addEventListener('click', async () => {
+        if (!state.connected) {
+          await handleConnectAndAutoHello();
+        }
+        const mergedStream = 'msg1|msg2|msg3';
+        document.getElementById('beginnerExplanationText').innerHTML =
+          `⚡ <b>TCP 字节流“粘包”原貌演示：</b>应用层连续调用了 3 次 Send 发送 <code class="text-purple-300 font-mono">"msg1"</code>、<code class="text-purple-300 font-mono">"msg2"</code>、<code class="text-purple-300 font-mono">"msg3"</code>，但在底层 TCP 眼里<b>没有“消息边界”只有连续的字节河</b>，Nagle 算法将它们合并进同一个 TCP 报文段一并送达！`;
+        await sendClientPayload(mergedStream, false);
+      });
+
+      // Sound toggle
+      document.getElementById('soundToggleBtn').addEventListener('click', (e) => {
+        state.soundEnabled = !state.soundEnabled;
+        e.currentTarget.textContent = state.soundEnabled ? '🔊 音效: 开' : '🔇 音效: 关';
+      });
+
+      // Clear stream logs
+      document.getElementById('clearClientLogBtn').addEventListener('click', () => {
+        document.getElementById('clientStreamBox').innerHTML = '<div class="text-slate-500 italic text-[11px]">视图已清空</div>';
+      });
+      document.getElementById('clearServerLogBtn').addEventListener('click', () => {
+        document.getElementById('serverStreamBox').innerHTML = '<div class="text-slate-500 italic text-[11px]">视图已清空</div>';
+      });
+
+      // Filter buttons
+      document.querySelectorAll('.pkt-filter-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.filterMode = btn.getAttribute('data-filter');
+          document.querySelectorAll('.pkt-filter-btn').forEach((b) => {
+            b.className = 'pkt-filter-btn px-2.5 py-1 rounded bg-slate-900 text-slate-400 border border-slate-800 hover:text-slate-200';
+          });
+          btn.className = 'pkt-filter-btn px-2.5 py-1 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40';
+          renderPacketTable();
+        });
+      });
+
+      // Reset Lab
+      document.getElementById('resetAllBtn').addEventListener('click', () => {
+        state.connected = false;
+        state.connecting = false;
+        state.closing = false;
+        state.clientState = 'CLOSED';
+        state.serverState = 'LISTEN';
+        state.clientRelSeq = 0;
+        state.clientRelAck = 0;
+        state.serverRelSeq = 0;
+        state.serverRelAck = 0;
+        state.clientBytesSent = 0;
+        state.clientBytesRecv = 0;
+        state.serverRequestCount = 0;
+        state.packets = [];
+        state.selectedPacketId = null;
+        state.pktCounter = 0;
+        document.getElementById('clientStreamBox').innerHTML = '<div class="text-slate-500 italic text-[11px]">等待发起连接...</div>';
+        document.getElementById('serverStreamBox').innerHTML = '<div class="text-emerald-400/90 text-[11px]">[SYS] 服务端已在 127.0.0.1:9527 自动启动并进入 LISTEN 状态，等待客户端连接...</div>';
+        document.getElementById('hexDumpContainer').innerHTML = '<div class="md:col-span-12 text-slate-500 text-center py-4">选中左侧任意一条 TCP 报文后，这里将展示每一个字节的 16 进制与 ASCII 真容</div>';
+        document.getElementById('beginnerExplanationText').innerHTML = '实验已重置！服务端已在 <code class="text-emerald-300 font-mono">127.0.0.1:9527</code> 自动启动，点击左侧按钮再次体验三次握手与报文解剖。';
+        updateRegistersUI();
+        renderPacketTable();
+      });
+
+      // Hovering RFC 9293 header fields highlights corresponding Hex bytes
+      document.querySelectorAll('.hdr-field').forEach((field) => {
+        field.addEventListener('mouseenter', () => {
+          const range = field.getAttribute('data-byte-range').split(',').map(Number);
+          highlightByteRange(range[0], range[1]);
+        });
+        field.addEventListener('mouseleave', () => {
+          clearByteHighlights();
+        });
+      });
+    });
+  </script>
+</body>
+</html>

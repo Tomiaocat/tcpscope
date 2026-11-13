@@ -1,0 +1,8 @@
+* text=auto
+
+# 跨平台脚本换行符
+*.sh  text eol=lf
+*.bat text eol=crlf
+
+# 二进制
+*.exe binary
