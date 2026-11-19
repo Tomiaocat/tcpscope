@@ -143,7 +143,8 @@
       background: var(--line); border-radius: var(--radius) var(--radius) 0 0;
     }
     .panel--client::before { background: linear-gradient(90deg, var(--client-fill), var(--client)); }
-    .panel--cable::before { background: linear-gradient(90deg, var(--client-fill), var(--accent), var(--server-fill)); }
+    .explain--wide { margin-top: 0; }
+    .explain--wide .explain-body { margin-top: 8px; }
     .panel--server::before { background: linear-gradient(90deg, var(--server), var(--server-fill)); }
 
     .panel-head {
@@ -313,38 +314,12 @@
     .byte-highlight { background: var(--accent-soft) !important; color: var(--text) !important; box-shadow: inset 0 0 0 1px var(--accent); }
     .hex-empty { grid-column: span 12; text-align: center; color: var(--text-3); padding: 18px 0; font-family: var(--font-sans); font-size: 12px; }
 
-    .cable-status { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); }
-    .cable-status.is-on { color: var(--accent); }
-    .cable-status.is-warn { color: var(--warn); }
-    .cable-body { display: flex; flex-direction: column; gap: 16px; flex: 1; justify-content: flex-start; padding-top: 16px; }
-    .cable-stage { position: relative; display: flex; flex-direction: column; justify-content: center; flex: 1; min-height: 190px; }
-    .nic-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--text-3); margin-bottom: 8px; }
-    .nic { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); }
-    .nic .dot { animation: softPulse 2.6s ease-in-out infinite; }
-    .cable-canvas {
-      position: relative; width: 100%; height: 110px; border-radius: 14px;
-      background: linear-gradient(180deg, #F8FBF9, #EFF5F1);
-      border: 1px solid var(--line);
-    }
-    .cable-canvas::after {
-      content: ""; position: absolute; inset: 16% 7%; border-radius: 999px;
-      border: 2px solid transparent; pointer-events: none; opacity: 0;
-    }
-    .cable-canvas.is-celebrating::after { animation: cableBurst 0.95s ease-out; }
-    .cable-svg { width: 100%; height: 100%; overflow: visible; }
-    .cable-track { transition: opacity 0.45s ease; }
-    .cable-track.is-off { opacity: 0; }
-    .cable-track:not(.is-off) { filter: drop-shadow(0 0 3px rgba(37, 116, 102, 0.28)); }
-    .cable-flow-right { stroke-dasharray: 6 7; }
-    .cable-flow-left { stroke-dasharray: 6 7; }
-    .cable-flow-right.is-flowing { animation: dashFlowRight var(--flow-duration, 1.8s) linear infinite; }
-    .cable-flow-left.is-flowing { animation: dashFlowLeft var(--flow-duration, 1.8s) linear infinite; }
-    @keyframes dashFlowRight { to { stroke-dashoffset: -52; } }
-    @keyframes dashFlowLeft { to { stroke-dashoffset: 52; } }
-    .led { fill: var(--line-strong); transition: fill 0.3s ease; }
-    .cable-canvas.is-live .led--client { fill: var(--client-fill); animation: ledBlink 1.6s ease-in-out infinite; }
-    .cable-canvas.is-live .led--server { fill: var(--server-fill); animation: ledBlink 1.6s ease-in-out infinite 0.35s; }
-    .flying-layer { position: absolute; inset: 0; pointer-events: none; }
+    /* ---- Duel stage: two panels side by side, mascots on top ---- */
+    .stage { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+    /* The stage is a two-column grid now, so each panel takes one column
+       rather than its old 12-column span (which overflowed onto a new row). */
+    #connectionStage > .col-6 { grid-column: span 1; }
+    #connectionStage { padding-top: 74px; }
     .live-line { display: flex; align-items: center; gap: 8px; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--text-3); padding-top: 8px; border-top: 1px solid var(--line); }
     .live-desc { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -362,18 +337,197 @@
     .code--warn { color: var(--warn); background: var(--warn-soft); }
     .code--danger { color: var(--danger); background: var(--danger-soft); }
 
-    .flying-pill {
-      position: absolute; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
-      border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--text);
-      font-family: var(--font-mono); font-size: 11px; font-weight: 700; white-space: nowrap; z-index: 5;
-      box-shadow: 0 6px 16px rgba(31, 45, 40, 0.14);
-      transition-property: left; transition-timing-function: linear;
-      animation: pillIn 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+    /* ---- Snowball duel: two mascots on top of the panels ----
+       Each mascot stands in a .mascot-perch at the top of its own panel.
+       Facing is a property of the perch layout (server perch mirrors its
+       child once), never of an animated element, so the pose can change
+       freely without ever flipping the character around.
+       Snowballs are rendered in #duelLayer, which spans the whole stage. */
+    .stage { position: relative; }
+
+    /* Perches are children of .stage, NOT of the panels: .panel sets
+       overflow:hidden, so a mascot placed inside one gets its head clipped off.
+       #connectionStage reserves 74px of padding-top; sitting the perch at that
+       line and pulling it up by its own height lands its feet on the panel's
+       top border, with the whole body visible above the cards. */
+    .mascot-perch {
+      position: absolute; top: 74px; width: 118px; height: 130px;
+      pointer-events: none; z-index: 6;
+      transform: translateY(-100%);
     }
-    .flying-pill--c2s { border-color: rgba(47, 109, 173, 0.42); color: var(--client); background: #F3F8FE; }
-    .flying-pill--s2c { border-color: rgba(168, 92, 30, 0.42); color: var(--server); background: #FEF7EE; }
-    .flying-pill--drop { border-color: rgba(178, 69, 80, 0.42); color: var(--danger); background: #FDF2F3; }
-    .flying-pill__label { font-size: 10px; font-weight: 400; opacity: 0.75; }
+    #perchClient { left: calc(25% - 59px + 8px); }
+    /* Mirror the whole perch once so the server mascot faces the client.
+       Its label/UI children opt back out with scaleX(-1). */
+    #perchServer { left: calc(75% - 59px + 8px); transform: translateY(-100%) scaleX(-1); }
+
+    .mermaid {
+      width: 100%; height: 100%; overflow: visible;
+      transform-origin: 50% 92%;
+      animation: mascotIdle 3.6s ease-in-out infinite;
+      will-change: transform;
+    }
+    #perchServer .mermaid { animation-delay: 0.8s; }
+
+    /* Aiming: squint, lean back, wind up the throwing arm */
+    .mermaid.is-aiming { animation: mascotAim 0.26s ease-out; }
+    /* Dodging: lean away from the incoming snowball */
+    .mermaid.is-dodging { animation: mascotDodge 0.44s cubic-bezier(0.3, 1.2, 0.4, 1); }
+    /* Hit: recoil with an "ouch" face */
+    .mermaid.is-hit { animation: mascotHit 0.38s cubic-bezier(0.3, 1.5, 0.5, 1); }
+
+    /* Expression swaps, driven purely by the classes above */
+    .m-eye-open { transition: opacity 0.1s ease; }
+    .m-eye-shut { opacity: 0; transition: opacity 0.1s ease; }
+    .mermaid.is-aiming .m-eye-open { opacity: 0; }
+    .mermaid.is-aiming .m-eye-shut { opacity: 1; }
+    .m-mouth-happy { opacity: 1; transition: opacity 0.1s ease; }
+    .m-mouth-ouch { opacity: 0; transition: opacity 0.1s ease; }
+    .mermaid.is-hit .m-mouth-happy { opacity: 0; }
+    .mermaid.is-hit .m-mouth-ouch { opacity: 1; }
+    .m-brow { transition: transform 0.14s ease; }
+    .mermaid.is-aiming .m-brow { transform: translateY(1.5px) rotate(-9deg); }
+
+    .mascot-name {
+      position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+      font-family: var(--font-mono); font-size: 10px; white-space: nowrap; color: var(--text-3);
+      padding: 1px 7px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line);
+    }
+    /* Undo the perch mirror so the server's label is never backwards. */
+    #perchServer .mascot-name { transform: translateX(-50%) scaleX(-1); }
+    .mascot-perch.is-connected .mascot-name { color: var(--accent); border-color: rgba(37, 116, 102, 0.4); }
+
+    /* The hungry one waits in the gap between the two panels. */
+    /* Sits in the gap between the panels and a little lower than the two
+       mermaids, so it reads as waiting at the bottom of the channel. */
+    .greedy-perch {
+      position: absolute; top: 74px; left: 50%; width: 96px; height: 118px;
+      pointer-events: none; z-index: 5;
+      transform: translate(-50%, -92%);
+    }
+    .greedy {
+      width: 100%; height: 100%; overflow: visible;
+      transform-origin: 50% 96%;
+      animation: greedyIdle 3.9s ease-in-out infinite;
+      will-change: transform;
+    }
+    .greedy.is-jumping { animation: greedyJump 0.62s cubic-bezier(0.3, 0.9, 0.4, 1); }
+    .greedy.is-chewing { animation: greedyChew 0.9s ease-in-out; }
+
+    /* Idle: mouth open, drooling. Chewing swaps both. */
+    .g-mouth-open { opacity: 1; transition: opacity 0.1s ease; }
+    .g-mouth-chew { opacity: 0; transition: opacity 0.1s ease; }
+    .greedy.is-chewing .g-mouth-open { opacity: 0; }
+    .greedy.is-chewing .g-mouth-chew { opacity: 1; }
+    .g-eye-open { transition: opacity 0.1s ease; }
+    .g-eye-shut { opacity: 0; transition: opacity 0.1s ease; }
+    .greedy.is-chewing .g-eye-open { opacity: 0; }
+    .greedy.is-chewing .g-eye-shut { opacity: 1; }
+    /* The drool stretches while it watches a snowball come down. */
+    .g-drool { transition: transform 0.3s ease; transform-origin: 59px 74px; }
+    .greedy.is-jumping .g-drool { transform: scaleY(1.35); }
+
+    @keyframes greedyIdle {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-2px) rotate(1.5deg); }
+    }
+    @keyframes greedyJump {
+      0%   { transform: translateY(0) scale(1, 1); }
+      18%  { transform: translateY(4px) scale(1.1, 0.9); }
+      45%  { transform: translateY(-26px) scale(0.94, 1.08); }
+      62%  { transform: translateY(-14px) scale(1.02, 0.98); }
+      100% { transform: translateY(0) scale(1, 1); }
+    }
+    @keyframes greedyChew {
+      0%, 100% { transform: scale(1, 1); }
+      25% { transform: scale(1.06, 0.94) rotate(-2deg); }
+      50% { transform: scale(0.96, 1.05) rotate(2deg); }
+      75% { transform: scale(1.03, 0.97); }
+    }
+
+    /* "Burp" bubble shown after swallowing. */
+    .burp-bubble {
+      position: absolute; z-index: 9;
+      font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+      color: var(--text-2); background: var(--surface); border: 1px solid var(--line-strong);
+      border-radius: 999px; padding: 2px 9px; white-space: nowrap;
+      box-shadow: 0 4px 12px rgba(31, 45, 40, 0.12);
+      animation: burpRise 1.1s ease-out forwards;
+    }
+    @keyframes burpRise {
+      0% { opacity: 0; transform: translate(-50%, 0) scale(0.7); }
+      25% { opacity: 1; transform: translate(-50%, -10px) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -34px) scale(0.95); }
+    }
+
+    @keyframes mascotIdle {
+      0%, 100% { transform: translateY(0) scale(1, 1); }
+      50% { transform: translateY(-3px) scale(1.012, 0.988); }
+    }
+    @keyframes mascotAim {
+      0% { transform: scale(1, 1) rotate(0deg); }
+      45% { transform: scale(0.94, 1.05) rotate(6deg) translateX(-3px); }
+      100% { transform: scale(1.05, 0.97) rotate(-4deg) translateX(4px); }
+    }
+    @keyframes mascotDodge {
+      0% { transform: translateX(0) rotate(0deg); }
+      35% { transform: translateX(-13px) rotate(-15deg) scale(0.96, 1.04); }
+      70% { transform: translateX(-9px) rotate(-9deg); }
+      100% { transform: translateX(0) rotate(0deg); }
+    }
+    @keyframes mascotHit {
+      0% { transform: scale(1, 1) rotate(0deg); }
+      40% { transform: scale(0.9, 1.08) rotate(7deg); }
+      100% { transform: scale(1, 1) rotate(0deg); }
+    }
+
+    .duel-layer { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+
+    .snowball {
+      position: absolute; z-index: 6; width: 26px; height: 26px; border-radius: 50%;
+      background: radial-gradient(circle at 32% 28%, #FFFFFF 0%, #F2F7FB 42%, #CBD9E4 100%);
+      box-shadow: 0 3px 10px rgba(47, 109, 173, 0.28), inset -2px -3px 5px rgba(120, 145, 170, 0.32);
+      transition-property: left, top;
+      transition-timing-function: linear;
+      animation: snowballPop 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.3);
+    }
+    .snowball--s2c { background: radial-gradient(circle at 32% 28%, #FFFFFF 0%, #FDF6EE 42%, #E4D2BC 100%); box-shadow: 0 3px 10px rgba(168, 92, 30, 0.26), inset -2px -3px 5px rgba(170, 145, 120, 0.32); }
+    .snowball--drop { background: radial-gradient(circle at 32% 28%, #FFFFFF 0%, #FDF2F3 45%, #E8C4C8 100%); box-shadow: 0 3px 10px rgba(178, 69, 80, 0.3); }
+    .snowball-label {
+      position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px;
+      display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--line-strong); background: var(--surface);
+      font-family: var(--font-mono); font-size: 10px; font-weight: 700; white-space: nowrap;
+      color: var(--text-2); box-shadow: 0 4px 12px rgba(31, 45, 40, 0.1);
+      transition: opacity 0.3s ease;
+    }
+    .snowball--c2s .snowball-label { color: var(--client); border-color: rgba(47, 109, 173, 0.4); }
+    .snowball--s2c .snowball-label { color: var(--server); border-color: rgba(168, 92, 30, 0.4); }
+    .snowball--drop .snowball-label { color: var(--danger); border-color: rgba(178, 69, 80, 0.4); }
+    .snowball-label small { font-size: 9.5px; font-weight: 400; opacity: 0.72; }
+    @keyframes snowballPop { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+
+    .snow-splat {
+      position: absolute; z-index: 7; width: 6px; height: 6px; border-radius: 50%; opacity: 0.9;
+      background: #EAF2F9; box-shadow: 0 0 0 1px rgba(47, 109, 173, 0.18);
+      animation: splatOut var(--splat-duration, 520ms) cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+    }
+    @keyframes splatOut {
+      0% { opacity: 0.95; transform: translate(0, 0) scale(1); }
+      100% { opacity: 0; transform: translate(var(--splat-x), var(--splat-y)) scale(0.35); }
+    }
+    .snowball-miss {
+      position: absolute; z-index: 8;
+      font-family: var(--font-mono); font-size: 11px; font-weight: 700; white-space: nowrap;
+      color: var(--danger); background: var(--surface); border: 1px solid rgba(178, 69, 80, 0.4);
+      border-radius: 999px; padding: 2px 9px;
+      box-shadow: 0 4px 12px rgba(31, 45, 40, 0.1);
+      animation: missFade 900ms ease-out forwards;
+    }
+    @keyframes missFade {
+      0% { opacity: 0; transform: translate(-50%, 0) scale(0.85); }
+      18% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -12px) scale(0.95); }
+    }
 
     .pop { animation: pop 0.42s cubic-bezier(0.2, 0.9, 0.3, 1.35); }
     @keyframes pop { 0% { transform: scale(1); } 45% { transform: scale(1.16); } 100% { transform: scale(1); } }
@@ -418,7 +572,65 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
       .cable-flow-right, .cable-flow-left, .nic .dot { animation: none; }
+      .fish { animation: none !important; }
     }
+
+    /* ---- App shell: sidebar + workspace ---- */
+    .app-layout { display: flex; align-items: stretch; min-height: 100vh; }
+    .app-sidebar {
+      position: sticky; top: 0; z-index: 50; flex: none;
+      width: 208px; height: 100vh;
+      display: flex; flex-direction: column; gap: 18px;
+      padding: 18px 14px 16px;
+      background: var(--surface); border-right: 1px solid var(--line);
+    }
+    .sidebar-brand { display: flex; align-items: center; gap: 10px; padding: 2px 6px 0; min-width: 0; }
+    .sidebar-mark {
+      width: 36px; height: 36px; flex: none; border-radius: 11px;
+      border: 1px solid var(--line); background: var(--surface-2);
+      display: grid; place-items: center; color: var(--accent);
+      box-shadow: var(--shadow-card);
+    }
+    .sidebar-brand-text { min-width: 0; }
+    .sidebar-name { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
+    .sidebar-sub { font-size: 10.5px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sidebar-nav { display: flex; flex-direction: column; gap: 4px; }
+    .sidebar-nav-label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding: 0 8px 4px; }
+    .sidebar-item {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      padding: 9px 10px; border-radius: 10px; border: 1px solid transparent;
+      background: transparent; color: var(--text-2); font-size: 13px; font-weight: 600;
+      text-align: left; cursor: pointer; transition: background 0.14s, color 0.14s, border-color 0.14s;
+    }
+    .sidebar-item:hover { background: var(--surface-2); color: var(--text); }
+    .sidebar-item.is-active { background: var(--accent-soft); border-color: rgba(37, 116, 102, 0.3); color: var(--accent); }
+    .sidebar-item-icon { display: grid; place-items: center; width: 22px; height: 22px; flex: none; }
+    .sidebar-item-text { display: flex; flex-direction: column; min-width: 0; }
+    .sidebar-item-name { line-height: 1.25; }
+    .sidebar-item-desc { font-size: 10.5px; font-weight: 400; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sidebar-item.is-active .sidebar-item-desc { color: var(--accent); opacity: 0.8; }
+    .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding: 0 4px; }
+    .sidebar-foot-hint { font-size: 10.5px; color: var(--text-3); line-height: 1.5; }
+
+    .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .workspace { display: none; }
+    .workspace.is-active { display: flex; flex-direction: column; gap: 28px; }
+
+    @media (max-width: 900px) {
+      .app-layout { flex-direction: column; }
+      .app-sidebar {
+        position: sticky; top: 0; width: 100%; height: auto;
+        flex-direction: row; align-items: center; gap: 12px;
+        padding: 10px 16px; border-right: 0; border-bottom: 1px solid var(--line);
+        overflow-x: auto;
+      }
+      .sidebar-brand { padding: 0; }
+      .sidebar-sub, .sidebar-nav-label, .sidebar-item-desc, .sidebar-foot { display: none; }
+      .sidebar-nav { flex-direction: row; gap: 6px; }
+      .sidebar-item { width: auto; padding: 7px 12px; white-space: nowrap; }
+      .workspace.is-active { gap: 20px; }
+    }
+
     /* ---- Protocol Lab ---- */
     .lab { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-card); padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
     .lab-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -486,6 +698,54 @@
 </head>
 <body>
 
+  <div class="app-layout">
+  <aside class="app-sidebar" aria-label="工作区导航">
+    <div class="sidebar-brand">
+      <div class="sidebar-mark" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 12h4l2.5-7 4 14 2.5-7H21" />
+        </svg>
+      </div>
+      <div class="sidebar-brand-text">
+        <div class="sidebar-name">tcpscope</div>
+        <div class="sidebar-sub">了不起的 TCP</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav" role="tablist" aria-orientation="vertical" aria-label="协议工作区">
+      <div class="sidebar-nav-label">工作区</div>
+      <button class="sidebar-item is-active" data-workspace="tcp" role="tab" aria-selected="true">
+        <span class="sidebar-item-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 12h5l2-5 3 10 2-5h8" />
+          </svg>
+        </span>
+        <span class="sidebar-item-text">
+          <span class="sidebar-item-name">TCP 协议</span>
+          <span class="sidebar-item-desc">握手 · 序号 · 报文解剖</span>
+        </span>
+      </button>
+      <button class="sidebar-item" data-workspace="http" role="tab" aria-selected="false">
+        <span class="sidebar-item-icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18" />
+          </svg>
+        </span>
+        <span class="sidebar-item-text">
+          <span class="sidebar-item-name">HTTP 协议</span>
+          <span class="sidebar-item-desc">TLS · HTTP · WebSocket</span>
+        </span>
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <span id="engineModeBadge" class="badge badge--muted">引擎检测中</span>
+      <div class="sidebar-foot-hint">所有监听器仅绑定回环地址。<br>TLS 开关只影响 9527 演示面。</div>
+    </div>
+  </aside>
+
+  <div class="app-main">
   <header class="app-header">
     <div class="header-inner">
       <div class="brand">
@@ -495,140 +755,18 @@
           </svg>
         </div>
         <div class="brand-text">
-          <div class="brand-name">tcpscope</div>
-          <div class="brand-sub">了不起的 TCP · 真实 Socket 报文解剖</div>
+          <div class="brand-name" id="workspaceTitle">TCP 协议</div>
+          <div class="brand-sub" id="workspaceSub">了不起的 TCP · 真实 Socket 报文解剖</div>
         </div>
       </div>
 
       <div class="header-right">
-        <div class="engine-wrap">
-          <span id="engineModeBadge" class="badge badge--muted">引擎检测中</span>
-        </div>
       </div>
     </div>
   </header>
 
   <main>
-    <section class="lab" id="protocolLab" aria-label="协议实验室">
-      <div class="lab-head">
-        <div class="lab-title">
-          <span id="labDot" class="dot dot--idle"></span>
-          <span>协议实验室</span>
-          <span id="labEngine" class="badge badge--muted">连接中…</span>
-        </div>
-        <div class="lab-controls">
-          <div class="lab-switch-group">
-            <span class="toolbar-label">TLS</span>
-            <button id="tlsToggle" class="lab-switch" role="switch" aria-checked="false" aria-label="切换 TLS" disabled>
-              <span class="lab-switch-knob"></span>
-            </button>
-            <span id="tlsState" class="lab-state">读取中</span>
-          </div>
-          <div class="lab-switch-group">
-            <span class="toolbar-label">显示解密明文</span>
-            <button id="revealToggle" class="lab-switch" role="switch" aria-checked="false" aria-label="显示解密明文" disabled>
-              <span class="lab-switch-knob"></span>
-            </button>
-            <span id="viewBadge" class="badge badge--muted">线上视角</span>
-          </div>
-          <select id="sessionPicker" class="lab-select" aria-label="选择会话">
-            <option value="">全部会话</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="journey">
-        <h2 id="journeyTitle" class="lab-title">一条连接，从 TCP 到 WebSocket</h2>
-        <p>TCP 建连后，可选的 TLS 为同一连接加密。先发送普通 HTTP 请求，再用 HTTP Upgrade 切换到 WebSocket，最后收发文本帧。</p>
-        <button id="runJourney" class="btn" type="button">运行完整演示</button>
-        <ol id="journeySteps">
-          <li><strong>1. TCP 建连</strong><span data-step="tcp">建立底层连接</span></li>
-          <li><strong>2. 可选 TLS</strong><span data-step="tls">使用上方 TLS 设置</span></li>
-          <li><strong>3. HTTP 请求</strong><span data-step="http">在连接上发送 GET</span></li>
-          <li><strong>4. HTTP 升级</strong><span data-step="upgrade">等待 101 响应</span></li>
-          <li><strong>5. WebSocket</strong><span data-step="ws">发送文本帧并接收回显</span></li>
-        </ol>
-        <p id="journeyStatus" role="status">点击「运行完整演示」，按顺序查看每一步的实际结果。打开 TLS 后可以再运行一次，对比握手结果。</p>
-      </div>
-      <div class="lab-foot" id="labEndpoint"></div>
-      <details class="lab-tools">
-        <summary>分层调试工具</summary>
-      <div class="lab-tabs" role="tablist" aria-label="协议视图">
-        <button class="lab-tab is-active" data-lab-tab="tls" role="tab" aria-selected="true">TLS</button>
-        <button class="lab-tab" data-lab-tab="http" role="tab" aria-selected="false">HTTP</button>
-        <button class="lab-tab" data-lab-tab="ws" role="tab" aria-selected="false">WS</button>
-      </div>
-
-      <div class="lab-panels">
-        <div class="lab-panel is-active" data-lab-panel="tls">
-          <div class="lab-grid">
-            <div class="lab-card">
-              <div class="lab-card-title"><span>证书</span><a id="certDownload" class="lab-link" href="/api/cert" download>下载 PEM</a></div>
-              <div id="certInfo" class="lab-kv">读取中…</div>
-            </div>
-            <div class="lab-card">
-              <div class="lab-card-title"><span>最近握手</span><span class="help" title="展示的是端点自己协商出的 TLS 参数，不是从密文推导的。">?</span></div>
-              <div id="handshakeInfo" class="lab-kv">尚未握手</div>
-            </div>
-          </div>
-          <div class="lab-card">
-            <div class="lab-card-title"><span>TLS 记录</span><span class="lab-hint-inline">服务端视角 · 应用数据始终以密文展示；明文见 HTTP/WS 标签（需打开开关）</span></div>
-            <div class="lab-table-wrap">
-              <table class="lab-table">
-                <thead>
-                  <tr><th>#</th><th>时间</th><th>流向</th><th>类型</th><th>版本</th><th>长度</th><th>密文预览</th></tr>
-                </thead>
-                <tbody id="tlsRecords">
-                  <tr><td colspan="7" class="empty">等待 TLS 记录</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div class="lab-panel" data-lab-panel="http">
-          <div class="lab-http-builder">
-            <select id="httpMethod" class="lab-select" aria-label="HTTP 方法">
-              <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
-            </select>
-            <input id="httpPath" class="field" value="/demo/hello" aria-label="HTTP 路径" />
-            <button id="httpSend" class="btn btn--sm btn--primary">发送请求</button>
-          </div>
-          <textarea id="httpBody" class="lab-textarea" rows="2" placeholder="请求体（POST/PUT 时使用）"></textarea>
-          <div class="lab-grid">
-            <div class="lab-card">
-              <div class="lab-card-title"><span>请求</span></div>
-              <pre id="httpRequest" class="lab-pre">尚未发送</pre>
-            </div>
-            <div class="lab-card">
-              <div class="lab-card-title"><span>响应</span><span id="httpMeta" class="lab-meta"></span></div>
-              <pre id="httpResponse" class="lab-pre">尚未发送</pre>
-            </div>
-          </div>
-        </div>
-
-        <div class="lab-panel" data-lab-panel="ws">
-          <div class="lab-http-builder">
-            <input id="wsPath" class="field" value="/demo/ws" aria-label="WebSocket 路径" />
-            <button id="wsOpen" class="btn btn--sm btn--primary">打开 WS</button>
-            <button id="wsClose" class="btn btn--sm btn--ghost" disabled>关闭</button>
-            <span id="wsStatus" class="badge badge--muted">未连接</span>
-          </div>
-          <div class="lab-http-builder">
-            <input id="wsMessage" class="field" value="hello over ws" aria-label="WebSocket 消息" />
-            <button id="wsSend" class="btn btn--sm btn--ghost" disabled>发送</button>
-          </div>
-          <div class="lab-card">
-            <div class="lab-card-title"><span>WS 帧</span><span class="lab-hint-inline">客户端视角；开启明文开关后显示载荷</span></div>
-            <div class="lab-log" id="wsFrames"><div class="lab-empty">尚未连接</div></div>
-          </div>
-        </div>
-      </div>
-
-      </details>
-      <div class="lab-foot" id="labHint">TLS 开关会真实重启 9527 演示监听器，并断开现有演示连接。</div>
-    </section>
-
+    <section class="workspace is-active" data-workspace-panel="tcp" aria-label="TCP 协议工作区">
     <section class="toolbar" aria-label="实验控制">
       <div class="toolbar-speed">
         <span class="toolbar-label">网线速度</span>
@@ -651,7 +789,9 @@
 
     <section class="stage" id="connectionStage">
 
-      <div id="clientPanel" class="panel col-3 panel--client">
+      <div id="clientPanel" class="panel col-6 panel--client">
+        <!-- The mascot stands on top of this panel and throws snowballs at
+             the server's mascot; see the duel layer below. -->
         <div class="panel-head">
           <div>
             <div class="panel-title">
@@ -719,84 +859,8 @@
         </div>
       </div>
 
-      <div class="panel col-6 panel-center panel--cable">
-        <div class="panel-head">
-          <div class="panel-title">
-            <span id="cableStatusDot" class="dot dot--idle"></span>
-            <span id="cableStatusTitle" class="cable-status">未连接 · 等待握手</span>
-          </div>
-          <div class="panel-head-right">
-            <span id="rttBadge" class="badge badge--muted">RTT 0.42 ms</span>
-            <span class="help" title="这里的每一帧都对应真实内核 Socket 的收发行为">?</span>
-          </div>
-        </div>
 
-        <div class="cable-body">
-          <div class="cable-stage">
-            <div class="nic-row">
-              <span class="nic"><span class="dot dot--client"></span>客户端 NIC</span>
-              <span id="inFlightCountBadge" class="badge badge--muted">信道空闲</span>
-              <span class="nic"><span class="dot dot--server"></span>服务端 NIC</span>
-            </div>
-
-            <div class="cable-canvas">
-              <svg class="cable-svg" viewBox="0 0 400 110" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <linearGradient id="cableGradConnected" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stop-color="#4A8ACB" stop-opacity="0.9" />
-                    <stop offset="50%" stop-color="#257466" stop-opacity="0.95" />
-                    <stop offset="100%" stop-color="#C9772C" stop-opacity="0.9" />
-                  </linearGradient>
-                  <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="1.2" result="blur" />
-                    <feMerge>
-                      <feMergeNode in="blur" />
-                      <feMergeNode in="SourceGraphic" />
-                    </feMerge>
-                  </filter>
-                </defs>
-
-                <rect x="8" y="36" width="384" height="38" rx="19" fill="#F8FBF9" stroke="#DCE5DF" stroke-width="1.5" />
-
-                <line id="txTrackBase" x1="20" y1="47" x2="380" y2="47" stroke="#D6DFD9" stroke-width="3.5" stroke-linecap="round" />
-                <line id="txTrackActive" x1="20" y1="47" x2="380" y2="47" stroke="url(#cableGradConnected)" stroke-width="4.5" stroke-linecap="round" class="cable-track cable-flow-right is-off" />
-
-                <line id="rxTrackBase" x1="20" y1="63" x2="380" y2="63" stroke="#D6DFD9" stroke-width="3.5" stroke-linecap="round" />
-                <line id="rxTrackActive" x1="20" y1="63" x2="380" y2="63" stroke="url(#cableGradConnected)" stroke-width="4.5" stroke-linecap="round" class="cable-track cable-flow-left is-off" />
-
-                <circle class="led led--client" cx="7" cy="26" r="2.6" />
-                <circle class="led led--server" cx="393" cy="26" r="2.6" />
-
-                <rect x="0" y="32" width="14" height="46" rx="4" fill="#EAF2FB" stroke="#2F6DAD" stroke-width="1.2" />
-                <rect x="386" y="32" width="14" height="46" rx="4" fill="#FDF1E4" stroke="#A85C1E" stroke-width="1.2" />
-              </svg>
-
-              <div id="flyingPacketsLayer" class="flying-layer"></div>
-            </div>
-
-            <div id="livePacketBanner" class="live-line">
-              <span>当前帧</span>
-              <span id="livePacketDesc" class="live-desc">尚未连接</span>
-            </div>
-          </div>
-
-          <div class="explain">
-            <div class="explain-meta">
-              <span>解说</span>
-              <span id="ServerCounterPill">服务端被请求次数: 0</span>
-            </div>
-            <div class="explain-head">
-              <span id="beginnerExplanationText" class="explain-summary">TCP 教学模拟已就绪</span>
-              <button id="explainToggle" class="explain-toggle" aria-expanded="false">展开</button>
-            </div>
-            <div id="beginnerExplanationFull" class="explain-body" hidden>
-              这是浏览器内的 TCP 教学模拟：点击「连接服务端」后会依次演示 SYN → SYN+ACK → ACK 三次握手，然后发送 <code class="code">hello</code>。真实 TLS/HTTP/WS 在上方协议实验室。
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div id="serverPanel" class="panel col-3 panel--server">
+      <div id="serverPanel" class="panel col-6 panel--server">
         <div class="panel-head">
           <div>
             <div class="panel-title">
@@ -853,7 +917,190 @@
         </div>
       </div>
 
+      <!-- The hungry little one perches between the two mascots. On a dropped
+
+
+           packet it jumps up, catches the snowball and eats it. -->
+        <div class="mascot-perch" id="perchClient">
+          <svg class="mermaid" viewBox="0 0 120 132" aria-hidden="true">
+            <defs>
+              <linearGradient id="hairClient" x1="30%" y1="0%" x2="70%" y2="100%">
+                <stop offset="0%" stop-color="#9CCBF0" />
+                <stop offset="100%" stop-color="#2F6DAD" />
+              </linearGradient>
+              <linearGradient id="tailClient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#7FB8E6" />
+                <stop offset="100%" stop-color="#245C93" />
+              </linearGradient>
+            </defs>
+            <!-- tail -->
+            <path d="M 52 96 q -14 12 -22 22 q 10 -2 14 2 q -6 8 -14 10 q 18 4 30 -6 q 6 -6 8 -16 Z"
+                  fill="url(#tailClient)" stroke="#1E5182" stroke-width="2.2" stroke-linejoin="round" />
+            <!-- body / dress -->
+            <path d="M 44 74 q 16 -8 32 0 q 8 14 6 26 q -22 8 -44 0 q -2 -12 6 -26 Z"
+                  fill="#F3F8FE" stroke="#2F6DAD" stroke-width="2.2" stroke-linejoin="round" />
+            <!-- arms -->
+            <path d="M 44 80 q -14 4 -16 14" fill="none" stroke="#F3F8FE" stroke-width="7" stroke-linecap="round" />
+            <path d="M 76 80 q 16 -2 20 -10" fill="none" stroke="#F3F8FE" stroke-width="7" stroke-linecap="round" />
+            <!-- thrown arm ends at the hand: snowball spawns from here -->
+            <circle cx="97" cy="69" r="5" fill="#F6D9C4" stroke="#C9A38A" stroke-width="1.5" />
+            <!-- head -->
+            <ellipse cx="60" cy="48" rx="27" ry="26" fill="#FBEAE0" stroke="#C9A38A" stroke-width="2" />
+            <!-- back hair -->
+            <path d="M 33 46 q -6 30 4 44 q -14 -6 -14 -28 q 0 -20 10 -16 Z" fill="url(#hairClient)" opacity="0.95" />
+            <!-- fringe -->
+            <path d="M 33 46 q 2 -24 27 -24 q 25 0 27 24 q -8 -12 -20 -10 q -6 -8 -14 0 q -12 -2 -20 10 Z"
+                  fill="url(#hairClient)" stroke="#1E5182" stroke-width="1.8" stroke-linejoin="round" />
+            <!-- eyes open -->
+            <g class="m-eye-open">
+              <ellipse cx="49" cy="52" rx="7" ry="8.5" fill="#FFFFFF" stroke="#2F6DAD" stroke-width="1.5" />
+              <ellipse cx="71" cy="52" rx="7" ry="8.5" fill="#FFFFFF" stroke="#2F6DAD" stroke-width="1.5" />
+              <circle cx="50" cy="53" r="4.2" fill="#245C93" />
+              <circle cx="72" cy="53" r="4.2" fill="#245C93" />
+              <circle cx="51.4" cy="50.6" r="1.6" fill="#FFFFFF" />
+              <circle cx="73.4" cy="50.6" r="1.6" fill="#FFFFFF" />
+            </g>
+            <!-- eyes shut (aiming) -->
+            <g class="m-eye-shut">
+              <path d="M 42 53 q 7 6 14 0" fill="none" stroke="#245C93" stroke-width="2.4" stroke-linecap="round" />
+              <path d="M 64 53 q 7 6 14 0" fill="none" stroke="#245C93" stroke-width="2.4" stroke-linecap="round" />
+            </g>
+            <!-- brows -->
+            <path class="m-brow" d="M 42 41 q 7 -4 14 -1" fill="none" stroke="#245C93" stroke-width="2.2" stroke-linecap="round" opacity="0.8" />
+            <path class="m-brow" d="M 64 40 q 7 -3 14 1" fill="none" stroke="#245C93" stroke-width="2.2" stroke-linecap="round" opacity="0.8" />
+            <!-- cheeks -->
+            <ellipse cx="38" cy="62" rx="5" ry="3.2" fill="#E8737F" opacity="0.35" />
+            <ellipse cx="82" cy="62" rx="5" ry="3.2" fill="#E8737F" opacity="0.35" />
+            <!-- mouth: smile -->
+            <path class="m-mouth-happy" d="M 55 64 q 5 5 10 0" fill="none" stroke="#8A4B52" stroke-width="2.2" stroke-linecap="round" />
+            <!-- mouth: ouch -->
+            <ellipse class="m-mouth-ouch" cx="60" cy="65" rx="4.5" ry="5.5" fill="#8A4B52" />
+          </svg>
+        </div>
+
+        <div class="mascot-perch" id="perchServer">
+          <svg class="mermaid" viewBox="0 0 120 132" aria-hidden="true">
+            <defs>
+              <linearGradient id="hairServer" x1="30%" y1="0%" x2="70%" y2="100%">
+                <stop offset="0%" stop-color="#F6C68E" />
+                <stop offset="100%" stop-color="#A85C1E" />
+              </linearGradient>
+              <linearGradient id="tailServer" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#F0B878" />
+                <stop offset="100%" stop-color="#8A4715" />
+              </linearGradient>
+            </defs>
+            <path d="M 52 96 q -14 12 -22 22 q 10 -2 14 2 q -6 8 -14 10 q 18 4 30 -6 q 6 -6 8 -16 Z"
+                  fill="url(#tailServer)" stroke="#7A3D10" stroke-width="2.2" stroke-linejoin="round" />
+            <path d="M 44 74 q 16 -8 32 0 q 8 14 6 26 q -22 8 -44 0 q -2 -12 6 -26 Z"
+                  fill="#FEF7EE" stroke="#A85C1E" stroke-width="2.2" stroke-linejoin="round" />
+            <path d="M 44 80 q -14 4 -16 14" fill="none" stroke="#FEF7EE" stroke-width="7" stroke-linecap="round" />
+            <path d="M 76 80 q 16 -2 20 -10" fill="none" stroke="#FEF7EE" stroke-width="7" stroke-linecap="round" />
+            <circle cx="97" cy="69" r="5" fill="#F6D9C4" stroke="#C9A38A" stroke-width="1.5" />
+            <ellipse cx="60" cy="48" rx="27" ry="26" fill="#FBEAE0" stroke="#C9A38A" stroke-width="2" />
+            <path d="M 33 46 q -6 30 4 44 q -14 -6 -14 -28 q 0 -20 10 -16 Z" fill="url(#hairServer)" opacity="0.95" />
+            <path d="M 33 46 q 2 -24 27 -24 q 25 0 27 24 q -8 -12 -20 -10 q -6 -8 -14 0 q -12 -2 -20 10 Z"
+                  fill="url(#hairServer)" stroke="#7A3D10" stroke-width="1.8" stroke-linejoin="round" />
+            <g class="m-eye-open">
+              <ellipse cx="49" cy="52" rx="7" ry="8.5" fill="#FFFFFF" stroke="#A85C1E" stroke-width="1.5" />
+              <ellipse cx="71" cy="52" rx="7" ry="8.5" fill="#FFFFFF" stroke="#A85C1E" stroke-width="1.5" />
+              <circle cx="50" cy="53" r="4.2" fill="#8A4715" />
+              <circle cx="72" cy="53" r="4.2" fill="#8A4715" />
+              <circle cx="51.4" cy="50.6" r="1.6" fill="#FFFFFF" />
+              <circle cx="73.4" cy="50.6" r="1.6" fill="#FFFFFF" />
+            </g>
+            <g class="m-eye-shut">
+              <path d="M 42 53 q 7 6 14 0" fill="none" stroke="#8A4715" stroke-width="2.4" stroke-linecap="round" />
+              <path d="M 64 53 q 7 6 14 0" fill="none" stroke="#8A4715" stroke-width="2.4" stroke-linecap="round" />
+            </g>
+            <path class="m-brow" d="M 42 41 q 7 -4 14 -1" fill="none" stroke="#8A4715" stroke-width="2.2" stroke-linecap="round" opacity="0.8" />
+            <path class="m-brow" d="M 64 40 q 7 -3 14 1" fill="none" stroke="#8A4715" stroke-width="2.2" stroke-linecap="round" opacity="0.8" />
+            <ellipse cx="38" cy="62" rx="5" ry="3.2" fill="#E8737F" opacity="0.35" />
+            <ellipse cx="82" cy="62" rx="5" ry="3.2" fill="#E8737F" opacity="0.35" />
+            <path class="m-mouth-happy" d="M 55 64 q 5 5 10 0" fill="none" stroke="#8A4B52" stroke-width="2.2" stroke-linecap="round" />
+            <ellipse class="m-mouth-ouch" cx="60" cy="65" rx="4.5" ry="5.5" fill="#8A4B52" />
+          </svg>
+        </div>
+
+      <div class="greedy-perch" id="perchGreedy">
+        <svg class="greedy" viewBox="0 0 110 124" aria-hidden="true">
+          <defs>
+            <linearGradient id="greedyBody" x1="35%" y1="10%" x2="65%" y2="100%">
+              <stop offset="0%" stop-color="#FFFFFF" />
+              <stop offset="100%" stop-color="#E6EBE8" />
+            </linearGradient>
+          </defs>
+          <!-- short legs -->
+          <rect x="40" y="104" width="11" height="14" rx="5.5" fill="#D9E1DD" stroke="#B9C5BF" stroke-width="1.8" />
+          <rect x="59" y="104" width="11" height="14" rx="5.5" fill="#D9E1DD" stroke="#B9C5BF" stroke-width="1.8" />
+          <!-- round body -->
+          <ellipse cx="55" cy="86" rx="31" ry="25" fill="url(#greedyBody)" stroke="#B9C5BF" stroke-width="2.2" />
+          <!-- arms -->
+          <path d="M 26 82 q -12 4 -14 12" fill="none" stroke="#E6EBE8" stroke-width="9" stroke-linecap="round" />
+          <path d="M 84 82 q 12 4 14 12" fill="none" stroke="#E6EBE8" stroke-width="9" stroke-linecap="round" />
+          <!-- head -->
+          <ellipse cx="55" cy="46" rx="33" ry="30" fill="#FBEADF" stroke="#D9B9A6" stroke-width="2.2" />
+          <!-- hair: dark bob with a centre part -->
+          <path d="M 22 44 q 0 -30 33 -30 q 33 0 33 30 q -6 -14 -16 -16 q -2 -8 -8 -6 q -4 -6 -9 0 q -6 -2 -8 6 q -10 2 -16 16 Z"
+                fill="#3B2F2A" stroke="#241C18" stroke-width="1.8" stroke-linejoin="round" />
+          <!-- brows -->
+          <path class="g-brow" d="M 34 34 q 8 -4 16 -2" fill="none" stroke="#3B2F2A" stroke-width="2.4" stroke-linecap="round" />
+          <path class="g-brow" d="M 60 32 q 8 -2 16 2" fill="none" stroke="#3B2F2A" stroke-width="2.4" stroke-linecap="round" />
+          <!-- eyes: wide and shiny -->
+          <g class="g-eye-open">
+            <ellipse cx="42" cy="50" rx="9" ry="10" fill="#FFFFFF" stroke="#8A6B58" stroke-width="1.6" />
+            <ellipse cx="68" cy="50" rx="9" ry="10" fill="#FFFFFF" stroke="#8A6B58" stroke-width="1.6" />
+            <circle cx="42.5" cy="51" r="5.4" fill="#2A201B" />
+            <circle cx="68.5" cy="51" r="5.4" fill="#2A201B" />
+            <circle cx="44.4" cy="48.4" r="2" fill="#FFFFFF" />
+            <circle cx="70.4" cy="48.4" r="2" fill="#FFFFFF" />
+          </g>
+          <!-- eyes shut while chewing -->
+          <g class="g-eye-shut">
+            <path d="M 34 51 q 8 7 16 0" fill="none" stroke="#2A201B" stroke-width="2.6" stroke-linecap="round" />
+            <path d="M 60 51 q 8 7 16 0" fill="none" stroke="#2A201B" stroke-width="2.6" stroke-linecap="round" />
+          </g>
+          <!-- cheeks -->
+          <ellipse cx="31" cy="60" rx="6" ry="3.6" fill="#E8899A" opacity="0.42" />
+          <ellipse cx="79" cy="60" rx="6" ry="3.6" fill="#E8899A" opacity="0.42" />
+          <!-- mouth: small open waiting mouth -->
+          <ellipse class="g-mouth-open" cx="55" cy="70" rx="6" ry="5" fill="#8A4B52" />
+          <!-- mouth: chewing -->
+          <ellipse class="g-mouth-chew" cx="55" cy="70" rx="8" ry="6" fill="#7A3F46" />
+          <!-- drool: idle stream from the corner of the mouth -->
+          <g class="g-drool">
+            <path d="M 59 74 q 4 8 1 15 q -3 6 1 9" fill="none" stroke="#BFE3F5" stroke-width="3"
+                  stroke-linecap="round" opacity="0.9" />
+            <ellipse cx="61" cy="99" rx="3.4" ry="4" fill="#BFE3F5" opacity="0.9" />
+          </g>
+          <!-- scarf -->
+          <path d="M 28 74 q 27 14 54 0 q 2 8 -2 11 q -25 11 -50 0 q -4 -3 -2 -11 Z"
+                fill="#D2453F" stroke="#A8332E" stroke-width="1.8" stroke-linejoin="round" />
+          <path d="M 66 84 q 6 10 3 20 l -9 -2 q 3 -9 -1 -16 Z"
+                fill="#D2453F" stroke="#A8332E" stroke-width="1.8" stroke-linejoin="round" />
+        </svg>
+        <span class="mascot-name">贪吃的</span>
+      </div>
+
+      <!-- Snowballs fly above the two panels, spanning the whole stage.
+           Sits above the panels (z-index) but does not block clicks. -->
+      <div id="duelLayer" class="duel-layer" aria-hidden="true"></div>
     </section>
+
+    <!-- Teaching commentary spans both panels. -->
+    <div class="explain explain--wide">
+      <div class="explain-meta">
+        <span>解说</span>
+        <span id="ServerCounterPill">服务端被请求次数: 0</span>
+      </div>
+      <div class="explain-head">
+        <span id="beginnerExplanationText" class="explain-summary">TCP 教学模拟已就绪</span>
+        <button id="explainToggle" class="explain-toggle" aria-expanded="false">展开</button>
+      </div>
+      <div id="beginnerExplanationFull" class="explain-body" hidden>
+        这是浏览器内的 TCP 教学模拟：点击「连接服务端」后会依次演示 SYN → SYN+ACK → ACK 三次握手，然后发送 <code class="code">hello</code>。真实 TLS/HTTP/WS 在上方协议实验室。
+      </div>
+    </div>
 
     <section class="lower-grid">
 
@@ -989,7 +1236,132 @@
       </div>
 
     </section>
+    </section>
+
+    <section class="workspace" data-workspace-panel="http" aria-label="HTTP 协议工作区">
+    <section class="lab" id="protocolLab" aria-label="协议实验室">
+      <div class="lab-head">
+        <div class="lab-title">
+          <span id="labDot" class="dot dot--idle"></span>
+          <span>协议实验室</span>
+          <span id="labEngine" class="badge badge--muted">连接中…</span>
+        </div>
+        <div class="lab-controls">
+          <div class="lab-switch-group">
+            <span class="toolbar-label">TLS</span>
+            <button id="tlsToggle" class="lab-switch" role="switch" aria-checked="false" aria-label="切换 TLS" disabled>
+              <span class="lab-switch-knob"></span>
+            </button>
+            <span id="tlsState" class="lab-state">读取中</span>
+          </div>
+          <div class="lab-switch-group">
+            <span class="toolbar-label">显示解密明文</span>
+            <button id="revealToggle" class="lab-switch" role="switch" aria-checked="false" aria-label="显示解密明文" disabled>
+              <span class="lab-switch-knob"></span>
+            </button>
+            <span id="viewBadge" class="badge badge--muted">线上视角</span>
+          </div>
+          <select id="sessionPicker" class="lab-select" aria-label="选择会话">
+            <option value="">全部会话</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="journey">
+        <h2 id="journeyTitle" class="lab-title">一条连接，从 TCP 到 WebSocket</h2>
+        <p>TCP 建连后，可选的 TLS 为同一连接加密。先发送普通 HTTP 请求，再用 HTTP Upgrade 切换到 WebSocket，最后收发文本帧。</p>
+        <button id="runJourney" class="btn" type="button">运行完整演示</button>
+        <ol id="journeySteps">
+          <li><strong>1. TCP 建连</strong><span data-step="tcp">建立底层连接</span></li>
+          <li><strong>2. 可选 TLS</strong><span data-step="tls">使用上方 TLS 设置</span></li>
+          <li><strong>3. HTTP 请求</strong><span data-step="http">在连接上发送 GET</span></li>
+          <li><strong>4. HTTP 升级</strong><span data-step="upgrade">等待 101 响应</span></li>
+          <li><strong>5. WebSocket</strong><span data-step="ws">发送文本帧并接收回显</span></li>
+        </ol>
+        <p id="journeyStatus" role="status">点击「运行完整演示」，按顺序查看每一步的实际结果。打开 TLS 后可以再运行一次，对比握手结果。</p>
+      </div>
+      <div class="lab-foot" id="labEndpoint"></div>
+      <details class="lab-tools">
+        <summary>分层调试工具</summary>
+      <div class="lab-tabs" role="tablist" aria-label="协议视图">
+        <button class="lab-tab is-active" data-lab-tab="tls" role="tab" aria-selected="true">TLS</button>
+        <button class="lab-tab" data-lab-tab="http" role="tab" aria-selected="false">HTTP</button>
+        <button class="lab-tab" data-lab-tab="ws" role="tab" aria-selected="false">WS</button>
+      </div>
+
+      <div class="lab-panels">
+        <div class="lab-panel is-active" data-lab-panel="tls">
+          <div class="lab-grid">
+            <div class="lab-card">
+              <div class="lab-card-title"><span>证书</span><a id="certDownload" class="lab-link" href="/api/cert" download>下载 PEM</a></div>
+              <div id="certInfo" class="lab-kv">读取中…</div>
+            </div>
+            <div class="lab-card">
+              <div class="lab-card-title"><span>最近握手</span><span class="help" title="展示的是端点自己协商出的 TLS 参数，不是从密文推导的。">?</span></div>
+              <div id="handshakeInfo" class="lab-kv">尚未握手</div>
+            </div>
+          </div>
+          <div class="lab-card">
+            <div class="lab-card-title"><span>TLS 记录</span><span class="lab-hint-inline">服务端视角 · 应用数据始终以密文展示；明文见 HTTP/WS 标签（需打开开关）</span></div>
+            <div class="lab-table-wrap">
+              <table class="lab-table">
+                <thead>
+                  <tr><th>#</th><th>时间</th><th>流向</th><th>类型</th><th>版本</th><th>长度</th><th>密文预览</th></tr>
+                </thead>
+                <tbody id="tlsRecords">
+                  <tr><td colspan="7" class="empty">等待 TLS 记录</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="lab-panel" data-lab-panel="http">
+          <div class="lab-http-builder">
+            <select id="httpMethod" class="lab-select" aria-label="HTTP 方法">
+              <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option>
+            </select>
+            <input id="httpPath" class="field" value="/demo/hello" aria-label="HTTP 路径" />
+            <button id="httpSend" class="btn btn--sm btn--primary">发送请求</button>
+          </div>
+          <textarea id="httpBody" class="lab-textarea" rows="2" placeholder="请求体（POST/PUT 时使用）"></textarea>
+          <div class="lab-grid">
+            <div class="lab-card">
+              <div class="lab-card-title"><span>请求</span></div>
+              <pre id="httpRequest" class="lab-pre">尚未发送</pre>
+            </div>
+            <div class="lab-card">
+              <div class="lab-card-title"><span>响应</span><span id="httpMeta" class="lab-meta"></span></div>
+              <pre id="httpResponse" class="lab-pre">尚未发送</pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="lab-panel" data-lab-panel="ws">
+          <div class="lab-http-builder">
+            <input id="wsPath" class="field" value="/demo/ws" aria-label="WebSocket 路径" />
+            <button id="wsOpen" class="btn btn--sm btn--primary">打开 WS</button>
+            <button id="wsClose" class="btn btn--sm btn--ghost" disabled>关闭</button>
+            <span id="wsStatus" class="badge badge--muted">未连接</span>
+          </div>
+          <div class="lab-http-builder">
+            <input id="wsMessage" class="field" value="hello over ws" aria-label="WebSocket 消息" />
+            <button id="wsSend" class="btn btn--sm btn--ghost" disabled>发送</button>
+          </div>
+          <div class="lab-card">
+            <div class="lab-card-title"><span>WS 帧</span><span class="lab-hint-inline">客户端视角；开启明文开关后显示载荷</span></div>
+            <div class="lab-log" id="wsFrames"><div class="lab-empty">尚未连接</div></div>
+          </div>
+        </div>
+      </div>
+
+      </details>
+      <div class="lab-foot" id="labHint">TLS 开关会真实重启 9527 演示监听器，并断开现有演示连接。</div>
+    </section>
+    </section>
   </main>
+  </div><!-- /.app-main -->
+  </div><!-- /.app-layout -->
 
   <script>
     // =========================================================================
@@ -1161,13 +1533,13 @@
       }
       state._lastHitCount = state.serverRequestCount;
 
-      // Cable appearance
-      const txActive = document.getElementById('txTrackActive');
-      const rxActive = document.getElementById('rxTrackActive');
-      const cableDot = document.getElementById('cableStatusDot');
-      const cableTitle = document.getElementById('cableStatusTitle');
-      const cableCanvas = document.querySelector('.cable-canvas');
-      if (cableCanvas) cableCanvas.classList.toggle('is-live', state.connected);
+      // The old centre cable panel is gone; connection state now shows only
+      // through the two panels' own badges and their mascots.
+      const perches = [document.getElementById('perchClient'), document.getElementById('perchServer')];
+      const live = journeyConnection
+        ? journeyConnection.phase === 'ESTABLISHED'
+        : state.connected;
+      perches.forEach((p) => { if (p) p.classList.toggle('is-connected', live); });
 
       if (journeyConnection) {
         const { phase, endpoint } = journeyConnection;
@@ -1177,22 +1549,6 @@
         cBadge.className = connected ? 'badge badge--ok' : 'badge badge--muted';
         sBadge.className = cBadge.className;
         document.getElementById('clientAddrBadge').textContent = endpoint?.split(' → ')[0] || '等待连接';
-        txActive.classList.toggle('is-off', phase === 'CLOSED');
-        rxActive.classList.toggle('is-off', phase === 'CLOSED');
-        cableDot.className = connected ? 'dot dot--ok' : 'dot dot--idle';
-        cableTitle.textContent = connected ? '演示回放 · 已连接' : phase === 'CLOSED' ? '演示连接已关闭' : '演示回放 · TCP 握手';
-      } else if (state.connected) {
-        txActive.classList.remove('is-off');
-        rxActive.classList.remove('is-off');
-        cableDot.className = 'dot dot--ok';
-        cableTitle.textContent = '已连接 · 全双工';
-        cableTitle.className = 'cable-status is-on';
-      } else {
-        txActive.classList.add('is-off');
-        rxActive.classList.add('is-off');
-        cableDot.className = state.connecting ? 'dot dot--warn' : 'dot dot--idle';
-        cableTitle.textContent = state.connecting ? '正在握手…' : '未连接 · 等待握手';
-        cableTitle.className = state.connecting ? 'cable-status is-warn' : 'cable-status';
       }
 
       // Buttons & Inputs
@@ -1244,15 +1600,9 @@
       el.classList.add('pop');
     }
 
-    // A soft expanding ring on the cable when the handshake completes
-    function celebrateCable() {
-      const canvas = document.querySelector('.cable-canvas');
-      if (!canvas) return;
-      canvas.classList.remove('is-celebrating');
-      void canvas.offsetWidth;
-      canvas.classList.add('is-celebrating');
-      setTimeout(() => canvas.classList.remove('is-celebrating'), 1000);
-    }
+    // The cable canvas was removed when the centre panel went away, so this
+    // is a no-op kept for its call sites.
+    function celebrateCable() {}
 
     // Update the one-line explanation + the collapsed teaching detail
     function setExplanation(shortHtml, fullHtml) {
@@ -1282,60 +1632,176 @@
     }
 
     // Animate a packet flying across the physical cable
+    // Convenience: restart a class-based animation, then clean it up
+    function withClass(el, cls, ms) {
+      if (!el) return;
+      el.classList.remove(cls);
+      void el.offsetWidth; // force reflow so re-adding restarts the animation
+      el.classList.add(cls);
+      setTimeout(() => el.classList.remove(cls), ms);
+    }
+
+    // Burst of white snow specks at an absolute point inside the duel layer.
+    function spawnSnowSplat(cx, cy, tint) {
+      const layer = document.getElementById('duelLayer');
+      if (!layer || !layer.offsetWidth) return;
+      const count = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 3 : 9;
+      for (let i = 0; i < count; i += 1) {
+        const speck = document.createElement('span');
+        speck.className = 'snow-splat';
+        const angle = (Math.PI * 2 * i) / count + Math.random() * 0.6;
+        const dist = 22 + Math.random() * 26;
+        speck.style.left = cx + 'px';
+        speck.style.top = cy + 'px';
+        speck.style.setProperty('--splat-x', (Math.cos(angle) * dist) + 'px');
+        speck.style.setProperty('--splat-y', (Math.sin(angle) * dist) + 'px');
+        speck.style.setProperty('--splat-duration', (420 + Math.random() * 260) + 'ms');
+        if (tint) speck.style.background = tint;
+        layer.appendChild(speck);
+        setTimeout(() => speck.remove(), 900);
+      }
+    }
+
+    // The snowball duel is TCP-only. The HTTP lab replays its own journey
+    // through this function; while that workspace is showing the stage is
+    // display:none, so an animation started there would run unseen.
+    function tcpWorkspaceVisible() {
+      const panel = document.querySelector('[data-workspace-panel="tcp"]');
+      return !!panel && panel.classList.contains('is-active');
+    }
+
+    // Where a mascot's throwing hand sits, in #duelLayer coordinates.
+    function mascotHand(side) {
+      const perch = document.getElementById(side === 'client' ? 'perchClient' : 'perchServer');
+      const layer = document.getElementById('duelLayer');
+      if (!perch || !layer) return null;
+      const p = perch.getBoundingClientRect();
+      const l = layer.getBoundingClientRect();
+      if (!p.width || !l.width) return null;
+      // The artwork faces right; the server perch is mirrored, so its hand is
+      // on the opposite edge. Both hands end up pointing inward.
+      const handX = side === 'client' ? p.right : p.left;
+      const handY = p.top + p.height * 0.52;
+      return { x: handX - l.left, y: handY - l.top };
+    }
+
+    // Animate one snowball thrown between the two mascots.
+    //   C2S: client mascot throws, server mascot takes it.
+    //   S2C: the other way round.
+    //   isDropped: the snowball bursts mid-air (packet lost).
+    // The receiver always dodges; a normal throw still connects (the dodge is
+    // a sidestep, not an escape) so ACKs keep reading as "received".
     function animateCablePacket({ direction, label, subLabel, flagsStr, isDropped = false }) {
       return new Promise((resolve) => {
-        const layer = document.getElementById('flyingPacketsLayer');
-        const badge = document.getElementById('inFlightCountBadge');
-        const liveDesc = document.getElementById('livePacketDesc');
+        const layer = document.getElementById('duelLayer');
+        if (!tcpWorkspaceVisible()) { resolve(); return; }
+        if (!layer) { resolve(); return; }
 
         const isC2S = direction === 'C2S';
-        const track = document.getElementById(isC2S ? 'txTrackActive' : 'rxTrackActive');
-        if (track) track.classList.add('is-flowing');
-        badge.textContent = isC2S ? '客户端 → 服务端' : '服务端 → 客户端';
-        badge.className = isC2S ? 'badge badge--client' : 'badge badge--server';
+        const throwerPerch = document.getElementById(isC2S ? 'perchClient' : 'perchServer');
+        const receiverPerch = document.getElementById(isC2S ? 'perchServer' : 'perchClient');
+        const thrower = throwerPerch && throwerPerch.querySelector('.mermaid');
+        const receiver = receiverPerch && receiverPerch.querySelector('.mermaid');
+        // The greedy one waits between the panels and steals dropped packets.
+        const greedy = document.querySelector('#perchGreedy .greedy');
 
-        liveDesc.textContent = `${isC2S ? '[C→S]' : '[S→C]'} ${flagsStr} · ${label} (${subLabel})`;
-
-        const pill = document.createElement('div');
-        const topPos = isC2S ? '8px' : '58px';
-        const variant = isDropped ? 'flying-pill--drop' : isC2S ? 'flying-pill--c2s' : 'flying-pill--s2c';
-
-        pill.className = `flying-pill ${variant}`;
-        pill.style.top = topPos;
-        pill.style.left = isC2S ? '4%' : '76%';
-        pill.style.transitionDuration = `${state.animDurationMs}ms`;
-        pill.innerHTML = `<span>${isC2S ? '→' : '←'} ${flagsStr}</span><span class="flying-pill__label">${label}</span>`;
-
-        layer.appendChild(pill);
         playBeep(isC2S ? 580 : 740, 0.05, 'triangle');
 
-        // Trigger position transition on next frame
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (isDropped) {
-              pill.style.left = '42%';
-            } else {
-              pill.style.left = isC2S ? '76%' : '4%';
-            }
-          });
-        });
+        // Winding up reads as aiming; the eyes squint via the CSS class.
+        if (thrower) withClass(thrower, 'is-aiming', 260);
+        if (throwerPerch) throwerPerch.classList.add('is-connected');
+        if (receiverPerch) receiverPerch.classList.add('is-connected');
 
+        const from = mascotHand(isC2S ? 'client' : 'server');
+        const to = mascotHand(isC2S ? 'server' : 'client');
+        const rect = layer.getBoundingClientRect();
+        const width = rect.width || 600;
+        const height = rect.height || 320;
+        const marble = 26;
+        // Fall back to sane positions if the perches are not laid out yet.
+        const startX = from ? from.x : width * (isC2S ? 0.14 : 0.86);
+        const startY = from ? from.y : height * 0.08;
+        const endX = to ? to.x : width * (isC2S ? 0.86 : 0.14);
+        const endY = to ? to.y : height * 0.08;
+        const midX = (startX + endX) / 2;
+        // Arc apex: well above both hands, clamped inside the layer.
+        const peakY = Math.max(4, Math.min(startY, endY) - Math.min(110, height * 0.34));
+
+        const ball = document.createElement('div');
+        ball.className = 'snowball ' + (isDropped ? 'snowball--drop' : (isC2S ? 'snowball--c2s' : 'snowball--s2c'));
+        ball.style.width = marble + 'px';
+        ball.style.height = marble + 'px';
+        ball.style.left = (startX - marble / 2) + 'px';
+        ball.style.top = (startY - marble / 2) + 'px';
+        ball.style.transitionDuration = Math.max(120, Math.round(state.animDurationMs / 2)) + 'ms';
+        const tag = document.createElement('span');
+        tag.className = 'snowball-label';
+        tag.innerHTML = (isC2S ? '→ ' : '← ') + flagsStr + '<small>' + label + '</small>';
+        ball.appendChild(tag);
+        layer.appendChild(ball);
+
+        const half = Math.max(140, Math.round(state.animDurationMs / 2));
+
+        // Leg 1: hand -> apex
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          ball.style.left = (midX - marble / 2) + 'px';
+          ball.style.top = (peakY - marble / 2) + 'px';
+        }));
+
+        // The receiver starts ducking as the snowball reaches the apex, so the
+        // dodge reads as a reaction to the incoming throw.
         setTimeout(() => {
           if (isDropped) {
-            pill.innerHTML = `<span>报文丢失 · 等待重传</span>`;
-            playBeep(190, 0.18, 'sawtooth');
-            setTimeout(() => {
-              pill.remove();
-              if (track) track.classList.remove('is-flowing');
-              resolve();
-            }, 650);
+            // The hungry one between the panels jumps and intercepts the lost
+            // packet, so the receiving mascot has nothing left to dodge.
+            if (greedy) withClass(greedy, 'is-jumping', 640);
+            playBeep(320, 0.07, 'square');
+            ball.style.left = (midX - marble / 2) + 'px';
+            ball.style.top = ((peakY + 26) - marble / 2) + 'px';
           } else {
-            pill.remove();
-            if (track) track.classList.remove('is-flowing');
-            badge.textContent = state.connected ? '信道已连通' : '信道空闲';
-            badge.className = 'badge badge--muted';
-            resolve();
+            if (receiver) withClass(receiver, 'is-dodging', 440);
+            // Aim slightly past the hand so the sidestep still connects.
+            const dodgeOffset = isC2S ? 10 : -10;
+            ball.style.left = (endX + dodgeOffset - marble / 2) + 'px';
+            ball.style.top = (endY - marble / 2) + 'px';
           }
+        }, half);
+
+        // Landing
+        setTimeout(() => {
+          if (isDropped) {
+            // Swallowed. The packet is still lost as far as TCP is concerned,
+            // so the loss marker stays even though nobody got hit.
+            ball.remove();
+            if (greedy) withClass(greedy, 'is-chewing', 900);
+            playBeep(190, 0.16, 'sawtooth');
+            setTimeout(() => playBeep(240, 0.09, 'sine'), 220);
+            const burp = document.createElement('span');
+            burp.className = 'burp-bubble';
+            burp.textContent = '嗝 · 报文丢失';
+            burp.style.left = midX + 'px';
+            burp.style.top = (peakY + 6) + 'px';
+            layer.appendChild(burp);
+            setTimeout(() => burp.remove(), 1150);
+
+            const miss = document.createElement('span');
+            miss.className = 'snowball-miss';
+            miss.textContent = '✕ 报文丢失 · 等待重传';
+            miss.style.left = (midX + 44) + 'px';
+            miss.style.top = (peakY + 34) + 'px';
+            layer.appendChild(miss);
+            setTimeout(() => miss.remove(), 900);
+            setTimeout(resolve, 620);
+            return;
+          }
+
+          spawnSnowSplat(endX, endY);
+          playBeep(isC2S ? 760 : 620, 0.05, 'sine');
+          tag.style.opacity = '0';
+          setTimeout(() => {
+            ball.remove();
+            resolve();
+          }, 200);
         }, state.animDurationMs);
       });
     }
@@ -2119,10 +2585,9 @@
         document.getElementById('serverStreamBox').innerHTML = '<div class="log-empty t-server">[SYS] TCP 教学模拟已就绪</div>';
         document.getElementById('clientInput').value = 'hello';
         document.getElementById('serverInput').value = 'server_push_01';
-        document.getElementById('livePacketDesc').textContent = '尚未连接';
-        const inflight = document.getElementById('inFlightCountBadge');
-        inflight.textContent = '信道空闲';
-        inflight.className = 'badge badge--muted';
+        // Clear anything still in flight from the previous run.
+        const duel = document.getElementById('duelLayer');
+        if (duel) duel.innerHTML = '';
         clearDissector();
         setExplanation('实验已重置 · 服务端监听中', '服务端已重新在 <code class="code">127.0.0.1:9527</code> 进入 LISTEN 状态。点击「连接服务端」可再次体验三次握手与报文解剖。');
         updateRegistersUI();
@@ -2227,7 +2692,12 @@
             upgrade: [['C2S', 'HTTP Upgrade: websocket', 'upgradeRequest'], ['S2C', 'HTTP 101 Switching Protocols', 'upgradeResponse']],
             ws: [['S2C', 'WS 欢迎帧', 'welcome'], ['C2S', 'WS 文本帧', 'wsRequest'], ['S2C', 'WS 回显帧', 'wsResponse']]
           };
-          $('connectionStage').querySelector('.cable-stage').scrollIntoView({ block: 'center' });
+          // Only scroll the TCP panels into view when the TCP workspace is
+          // actually on screen; otherwise this would jump the page while the
+          // user is looking at the HTTP lab.
+          if (tcpWorkspaceVisible()) {
+            $('connectionStage').scrollIntoView({ block: 'start' });
+          }
           let completed = 0;
           for (const step of steps) {
             const detail = result.steps[step.dataset.step];
@@ -2633,6 +3103,50 @@
         if (name === 'ws') renderWS();
       }
 
+      // Sidebar: switch between the TCP teaching workspace and the HTTP lab.
+      // Both workspaces keep running while hidden; only visibility changes.
+      const WORKSPACES = {
+        tcp: { title: 'TCP 协议', sub: '了不起的 TCP · 三次握手 · 序号演进 · 报文解剖' },
+        http: { title: 'HTTP 协议', sub: '真实 TLS · HTTP/1.1 · WebSocket 分层实验室' }
+      };
+
+      function setWorkspace(name) {
+        if (!WORKSPACES[name]) return;
+        state.workspace = name;
+        document.querySelectorAll('.sidebar-nav [data-workspace]').forEach((b) => {
+          const on = b.getAttribute('data-workspace') === name;
+          b.classList.toggle('is-active', on);
+          b.setAttribute('aria-selected', String(on));
+        });
+        document.querySelectorAll('[data-workspace-panel]').forEach((p) => {
+          p.classList.toggle('is-active', p.getAttribute('data-workspace-panel') === name);
+        });
+        const meta = WORKSPACES[name];
+        const titleEl = $('workspaceTitle');
+        const subEl = $('workspaceSub');
+        if (titleEl) titleEl.textContent = meta.title;
+        if (subEl) subEl.textContent = meta.sub;
+        // Re-render the HTTP panels on reveal: they were hidden while the
+        // event stream kept appending, so their DOM may be stale.
+        if (name === 'http') {
+          renderTLS();
+          renderWS();
+          renderStatus();
+        }
+        try { window.location.hash = name === 'tcp' ? '' : name; } catch (_) {}
+      }
+
+      // The duel geometry is measured fresh on every throw, so a resize only
+      // needs to drop anything caught mid-flight at the old coordinates.
+      let resizeTimer = null;
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          const layer = document.getElementById('duelLayer');
+          if (layer) layer.querySelectorAll('.snowball').forEach((b) => b.remove());
+        }, 180);
+      });
+
       function init() {
         $('tlsToggle').addEventListener('click', toggleTLS);
         $('revealToggle').addEventListener('click', () => setReveal(!state.reveal));
@@ -2642,6 +3156,14 @@
         $('wsClose').addEventListener('click', closeWS);
         $('sessionPicker').addEventListener('change', (e) => { state.selected = e.target.value; renderWS(); });
         document.querySelectorAll('.lab-tab').forEach((b) => b.addEventListener('click', () => setTab(b.getAttribute('data-lab-tab'))));
+
+        // Sidebar workspace switching, with hash deep-linking (#http / #tcp)
+        document.querySelectorAll('.sidebar-nav [data-workspace]').forEach((b) => {
+          b.addEventListener('click', () => setWorkspace(b.getAttribute('data-workspace')));
+        });
+        const initialWorkspace = window.location.hash === '#http' ? 'http' : 'tcp';
+        setWorkspace(initialWorkspace);
+
         refreshStatus().then((ok) => {
           if (ok) {
             connectEvents();

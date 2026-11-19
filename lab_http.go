@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -326,21 +327,44 @@ func (l *Lab) demoBaseURL() string {
 	return scheme + "://" + l.demoAddr()
 }
 
-func (l *Lab) newLabTransport() *http.Transport {
+// newLabTransport builds the client transport used by the control plane to
+// drive the demo plane. The returned transport stores the local (client) port
+// of the connection it opened in localPort, so reconstructed TCP frames can
+// carry the port that actually appeared on the wire.
+//
+// localPort must be accessed atomically: the dialer runs on net/http's
+// goroutines, so a bare write would race with the read after Do returns.
+func (l *Lab) newLabTransport(localPort *atomic.Uint32) *http.Transport {
 	tr := &http.Transport{
 		Proxy:                 nil,
-		DialContext:           (&net.Dialer{Timeout: 10 * time.Second}).DialContext,
 		TLSClientConfig:       l.tlsMgr.ClientConfig(),
 		DisableKeepAlives:     true,
 		ForceAttemptHTTP2:     false,
 		ResponseHeaderTimeout: 15 * time.Second,
+	}
+	// Both plaintext and TLS requests must report the ephemeral port, so
+	// record it from the net.Conn whichever dialer ran.
+	recordPort := func(c net.Conn) net.Conn {
+		if localPort != nil {
+			if a, ok := c.LocalAddr().(*net.TCPAddr); ok && a.Port >= 0 && a.Port <= 65535 {
+				localPort.Store(uint32(a.Port))
+			}
+		}
+		return c
+	}
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		raw, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, addr)
+		if err != nil {
+			return nil, err
+		}
+		return recordPort(raw), nil
 	}
 	tr.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		raw, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, addr)
 		if err != nil {
 			return nil, err
 		}
-		rc := &recordingConn{Conn: raw, lab: l, side: "client"}
+		rc := &recordingConn{Conn: recordPort(raw), lab: l, side: "client"}
 		tc := tlsClientHandshake(rc, l.tlsMgr.ClientConfig(), ctx)
 		if tc == nil {
 			raw.Close()
@@ -398,7 +422,8 @@ func (l *Lab) handleDemoHTTP(w http.ResponseWriter, r *http.Request) {
 		transport = "tls"
 	}
 	sess := l.sessions.New("http", transport, "client", u.String())
-	client := &http.Client{Transport: l.newLabTransport(), Timeout: 20 * time.Second}
+	var clientPort atomic.Uint32
+	client := &http.Client{Transport: l.newLabTransport(&clientPort), Timeout: 20 * time.Second}
 	start := time.Now()
 	resp, err := client.Do(hreq)
 	duration := time.Since(start)
@@ -455,9 +480,13 @@ func (l *Lab) handleDemoHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	sess.SetState("done")
 
+	// clientPort is the ephemeral port the dialer reported. It stays 0 only if
+	// the connection was not opened by our transport, and 0 reads as
+	// "unknown" — more honest than a fabricated port.
+	cPort := uint16(clientPort.Load())
 	sPort, _ := portOf(l.demoAddr())
-	c2s := buildFrame(sess.Snapshot.ID, "C2S", 52000, sPort, 1, 1, TCPFlags{PSH: true, ACK: true}, reqDump, "http", "HTTP 请求")
-	s2c := buildFrame(sess.Snapshot.ID, "S2C", sPort, 52000, 1, uint32(len(reqDump))+1, TCPFlags{PSH: true, ACK: true}, respDump, "http", "HTTP 响应")
+	c2s := buildFrame(sess.Snapshot.ID, "C2S", cPort, sPort, 1, 1, TCPFlags{PSH: true, ACK: true}, reqDump, "http", "HTTP 请求")
+	s2c := buildFrame(sess.Snapshot.ID, "S2C", sPort, cPort, 1, uint32(len(reqDump))+1, TCPFlags{PSH: true, ACK: true}, respDump, "http", "HTTP 响应")
 	sess.AddFrame(c2s)
 	sess.AddFrame(s2c)
 	l.publishFrame(c2s)

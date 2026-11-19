@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -68,7 +69,22 @@ type Session struct {
 	events    []Event
 	frames    []FrameRecord
 	closeFn   func(reason string)
+	conn      net.Conn
 	lastAt    time.Time
+}
+
+// SetConn records the live socket backing this session. Reconstructed TCP
+// frames read the real local port from it so they do not have to invent one.
+func (s *Session) SetConn(c net.Conn) {
+	s.mu.Lock()
+	s.conn = c
+	s.mu.Unlock()
+}
+
+func (s *Session) liveConn() net.Conn {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.conn
 }
 
 const (

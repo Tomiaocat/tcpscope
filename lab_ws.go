@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -47,6 +48,7 @@ func (l *Lab) handleDemoWS(w http.ResponseWriter, r *http.Request) {
 		transport = "tls"
 	}
 	sess := l.sessions.New("ws", transport, localAddrString(r), r.RemoteAddr)
+	sess.SetConn(ws.NetConn())
 	if r.TLS != nil {
 		info := l.tlsMgr.InfoFromState(*r.TLS, true)
 		sess.SetTLS(info)
@@ -108,6 +110,7 @@ func (l *Lab) handleDemoWSOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := l.sessions.New("ws", transport, "client", rawURL)
+	sess.SetConn(ws.NetConn())
 	var tlsInfo *TLSInfo
 	if ws.TLSState() != nil {
 		tlsInfo = l.tlsMgr.InfoFromState(*ws.TLSState(), false)
@@ -283,12 +286,14 @@ func (l *Lab) publishWSFrame(sess *Session, dir string, opcode byte, payload []b
 			c.BytesOut += int64(len(payload))
 		}
 	})
-	cPort, _ := portOf(sess.Snapshot.RemoteAddr)
-	sPort, _ := portOf(sess.Snapshot.LocalAddr)
-	if side == "client" {
-		cPort, sPort = 52000, mustPort(l.demoAddr())
+	cPort, sPort := wsFramePorts(sess, side, l.demoAddr())
+	// buildFrame takes (srcPort, dstPort), so the orientation depends on the
+	// direction: C2S goes client -> server, S2C goes server -> client.
+	srcPort, dstPort := cPort, sPort
+	if dir == "S2C" {
+		srcPort, dstPort = sPort, cPort
 	}
-	frame := buildFrame(sess.Snapshot.ID, dir, cPort, sPort, 1, 1, TCPFlags{PSH: true, ACK: true}, payload, "ws", "WS 帧")
+	frame := buildFrame(sess.Snapshot.ID, dir, srcPort, dstPort, 1, 1, TCPFlags{PSH: true, ACK: true}, payload, "ws", "WS 帧")
 	sess.AddFrame(frame)
 	l.publishFrame(frame)
 }
@@ -315,4 +320,27 @@ func (l *Lab) publishWS(typ string, sess *Session, dir, summary, transport, side
 func mustPort(addr string) uint16 {
 	p, _ := portOf(addr)
 	return p
+}
+
+// wsFramePorts resolves the client and server ports used to reconstruct a TCP
+// frame for a WebSocket message.
+//
+// Server-side sessions carry the real socket addresses, which are already
+// oriented the way the frame needs. Client-side sessions store the dial URL in
+// RemoteAddr, so the ephemeral port has to come from the live connection — the
+// handshake itself already read it. When it is unavailable the port is left at
+// 0, which reads as "unknown" rather than a fabricated value.
+func wsFramePorts(sess *Session, side, demoAddr string) (cPort, sPort uint16) {
+	if side != "client" {
+		cPort, _ = portOf(sess.Snapshot.RemoteAddr)
+		sPort, _ = portOf(sess.Snapshot.LocalAddr)
+		return cPort, sPort
+	}
+	sPort = mustPort(demoAddr)
+	if c := sess.liveConn(); c != nil {
+		if a, ok := c.LocalAddr().(*net.TCPAddr); ok {
+			cPort = uint16(a.Port)
+		}
+	}
+	return cPort, sPort
 }

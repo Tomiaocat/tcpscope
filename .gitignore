@@ -21,3 +21,9 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# 本地临时快照
+/.backup/
+*.tmp.js
+*.tmp.html
+*.exe~
